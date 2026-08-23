@@ -1,0 +1,9 @@
+*.o
+gram
+test_gram
+gram_*
+smoke_*
+*.wav
+*.mp4
+*.flac
+michacka_*
