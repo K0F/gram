@@ -1,0 +1,9 @@
+[submodule "tj"]
+	path = tj
+	url = git@github.com:K0F/tj.git
+[submodule "michacka"]
+	path = michacka
+	url = git@github.com:K0F/m-cha-ka.git
+[submodule "OperatorOmikron"]
+	path = OperatorOmikron
+	url = git@github.com:K0F/OperatorOmikron.git
