@@ -19,9 +19,9 @@
 
 void av_opts_defaults(AvOpts *o)
 {
-    o->w = 1280;
-    o->h = 720;
-    o->fps = 30;
+    o->w = 720;   /* PAL SD */
+    o->h = 576;
+    o->fps = 25;
 }
 
 typedef struct {
@@ -103,24 +103,36 @@ static void entry_start(VEntry *e, const AvOpts *o)
     e->active = 1;
     if (strcmp(e->gen, "file") == 0 && !e->clip)
         snprintf(e->gen, sizeof(e->gen), "scope");
+    /* 'vfile' streams spec.filepath itself (deterministic text edits),
+     * honoring the EDL in-point; 'file' pairs into the pool by hash */
+    int is_vfile = strcmp(e->gen, "vfile") == 0;
+    int is_file = strcmp(e->gen, "file") == 0;
 
-    if (strcmp(e->gen, "file") == 0) {
-        double frac = fmod((double)(fnv1a(e->spec.filepath) % 1000003u) * PHI, 1.0);
-        double cdur = source_duration_sec(e->clip);
+    if (is_file || is_vfile) {
+        const char *src = is_vfile ? e->spec.filepath : e->clip;
+        double cdur = source_duration_sec(src);
         if (cdur <= 0) cdur = 60.0;
         double span = e->span < cdur * 0.9 ? e->span : cdur * 0.9;
-        double off = frac * (cdur > span ? cdur - span : 0.0);
+        double off;
+        if (is_vfile) {
+            off = e->spec.has_in ? (double)e->spec.in_sec : 0.0;
+            if (off + span > cdur) off = cdur > span ? cdur - span : 0.0;
+        } else {
+            double frac = fmod((double)(fnv1a(e->spec.filepath) % 1000003u) * PHI, 1.0);
+            off = frac * (cdur > span ? cdur - span : 0.0);
+        }
         char cmd[2048];
         snprintf(cmd, sizeof(cmd),
                  "ffmpeg -v quiet -ss %.3f -t %.3f -i \"%s\" -map 0:v:0 "
                  "-vf fps=%d,scale=%d:%d -f rawvideo -pix_fmt rgb24 -",
-                 off, e->span, e->clip, o->fps, o->w, o->h);
+                 off, e->span, src, o->fps, o->w, o->h);
         e->vpipe = popen(cmd, "r");
         if (!e->vpipe) snprintf(e->gen, sizeof(e->gen), "scope");
         return;
     }
 
-    if (!e->pcm && strcmp(e->gen, "glyph") != 0) {
+    if (!e->pcm && strcmp(e->gen, "glyph") != 0 &&
+        strcmp(e->gen, "vfile") != 0) {
         e->pcm = load_audio_slice(&e->spec, &e->pcm_frames, 1.0f, 1.0f);
         if (!e->pcm) snprintf(e->gen, sizeof(e->gen), "glyph");
     }
@@ -173,9 +185,8 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     if (!opts) { av_opts_defaults(&def); opts = &def; }
     int W = opts->w, H = opts->h, FPS = opts->fps;
 
-    char edl_buf[4096];
-    strncpy(edl_buf, music_edl, sizeof(edl_buf));
-    edl_buf[sizeof(edl_buf) - 1] = '\0';
+    char *edl_buf = xmalloc(strlen(music_edl) + 1);
+    strcpy(edl_buf, music_edl);
 
     VEntry *entries = calloc(MAX_TRACKS, sizeof(VEntry));
     if (!entries) die("out of memory");
@@ -207,8 +218,9 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     }
 
     /* the muxed audio can outlast the music EDL (field layering adds
-     * tail); stretch the longest-running entry so visuals cover it all */
-    double audio_dur = source_duration_sec(audio_wav);
+     * tail); stretch the longest-running entry so visuals cover it all.
+     * silent renders (audio_wav == NULL) keep the EDL's own duration. */
+    double audio_dur = audio_wav && audio_wav[0] ? source_duration_sec(audio_wav) : 0.0;
     if (audio_dur > total_dur) {
         int last = 0;
         for (int i = 1; i < n; i++)
@@ -219,14 +231,21 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     }
 
     StrList pool = { 0 };
-    if (vid_dir && vid_dir[0]) scan_video_dir(vid_dir, &pool);
-    if (pool.n > 0) {
+    int want_pool = 0;
+    for (int i = 0; i < n; i++)
+        if (strcmp(entries[i].gen, "file") == 0) { want_pool = 1; break; }
+    if (!want_pool) {
+        /* vfile-only edit: every entry streams its own spec.filepath */
+    } else if (vid_dir && vid_dir[0]) {
+        scan_video_dir(vid_dir, &pool);
+    }
+    if (want_pool && pool.n > 0) {
         printf("av: video pool: %d clips (%s)\n", pool.n, vid_dir);
         for (int i = 0; i < n; i++)
             if (strcmp(entries[i].gen, "file") == 0)
                 entries[i].clip = pool.v[fnv1a(entries[i].spec.filepath) % (unsigned long)pool.n];
     } else {
-        printf("av: no video pool, procedural visuals only\n");
+        if (want_pool) printf("av: no video pool, procedural visuals only\n");
         for (int i = 0; i < n; i++)
             if (strcmp(entries[i].gen, "file") == 0)
                 snprintf(entries[i].gen, sizeof(entries[i].gen),
@@ -239,11 +258,17 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     long long nframes = (long long)(total_dur * FPS + 0.5);
 
     char outcmd[4096];
-    snprintf(outcmd, sizeof(outcmd),
-             "ffmpeg -v warning -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i - "
-             "-i \"%s\" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "
-             "-c:a aac -b:a 192k -shortest \"%s\"",
-             W, H, FPS, audio_wav, out_mp4);
+    if (audio_wav && audio_wav[0])
+        snprintf(outcmd, sizeof(outcmd),
+                 "ffmpeg -v warning -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i - "
+                 "-i \"%s\" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "
+                 "-c:a aac -b:a 192k -shortest \"%s\"",
+                 W, H, FPS, audio_wav, out_mp4);
+    else
+        snprintf(outcmd, sizeof(outcmd),
+                 "ffmpeg -v warning -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i - "
+                 "-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -an \"%s\"",
+                 W, H, FPS, out_mp4);
     FILE *enc = popen(outcmd, "w");
     if (!enc) die("av_render: cannot start ffmpeg encoder");
 
@@ -278,7 +303,8 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
                     pclose(e->vpipe);
                     e->vpipe = NULL; /* hold last decoded frame in src */
                 }
-            } else if (!e->vpipe && e->active && strcmp(e->gen, "file") == 0) {
+            } else if (!e->vpipe && e->active &&
+                       (strcmp(e->gen, "file") == 0 || strcmp(e->gen, "vfile") == 0)) {
                 /* pipe exhausted: freeze on last frame */
             } else if (strcmp(e->gen, "scope") == 0 && e->pcm) {
                 scope_render(e->scope, src, e->pcm, e->pcm_frames / 2,
@@ -324,6 +350,7 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     frame_free(src);
     for (int i = 0; i < n; i++) entry_stop(&entries[i]);
     free(entries);
+    free(edl_buf);
     if (rc != 0) fprintf(stderr, "gram av: encoder exited %d\n", rc);
     printf("av rendered -> %s\n", out_mp4);
     return rc != 0;

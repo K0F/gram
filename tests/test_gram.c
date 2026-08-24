@@ -1,4 +1,5 @@
 #include "analysis.h"
+#include "edit.h"
 #include "library.h"
 #include "omicron.h"
 #include "plan.h"
@@ -164,6 +165,68 @@ static void test_frame_blend(void)
     free(s->px); free(s);
 }
 
+static void test_edit_plan(void)
+{
+    const char *paths[3] = { "/v/a.mp4", "/v/b.mp4", "/v/c.mp4" };
+    double durs[3] = { 60.0, 60.0, 60.0 };
+    EditCfg c;
+    edit_cfg_defaults(&c);
+    CHECK(fabs(c.span - 0.432) < 1e-9);
+
+    EditCut cuts[64], again[64];
+    memset(cuts, 0, sizeof(cuts));
+    memset(again, 0, sizeof(again));
+    long n = edit_plan_text("this is source string", paths, durs, 3, &c, cuts, 64);
+    CHECK(n == 18); /* letters only */
+
+    /* letter -> (v-1) mod pool: 't' = 20 -> (20-1)%3 = 1 */
+    CHECK(cuts[0].clip == ('t' - 'a') % 3);
+    CHECK(fabs(cuts[0].at) < 1e-9);
+    CHECK(fabs(cuts[0].span - c.span) < 1e-9);
+    /* k=0: golden frac is 0, cut starts at clip head */
+    CHECK(fabs(cuts[0].in_sec) < 1e-9);
+
+    /* determinism: same text -> byte-identical plan */
+    long n2 = edit_plan_text("this is source string", paths, durs, 3, &c,
+                             again, 64);
+    CHECK(n2 == 18);
+    CHECK(memcmp(again, cuts, sizeof(EditCut) * 18) == 0);
+
+    /* in-point follows text position via golden-ratio scatter */
+    double phi = 0.6180339887498949;
+    int k = 5;
+    double want_in = fmod((double)k * phi, 1.0) * (60.0 - c.span);
+    CHECK(fabs(cuts[k].in_sec - want_in) < 1e-6);
+
+    /* timeline is continuous back-to-back: "a b" -> b right after a */
+    n = edit_plan_text("a b", paths, durs, 3, &c, cuts, 64);
+    CHECK(n == 2);
+    CHECK(fabs(cuts[1].at - c.span) < 1e-9);
+
+    /* uppercase folds to the same cut as lowercase */
+    EditCut up[4], lo[4];
+    CHECK(edit_plan_text("A", paths, durs, 3, &c, up, 4) == 1);
+    CHECK(edit_plan_text("a", paths, durs, 3, &c, lo, 4) == 1);
+    CHECK(up[0].clip == lo[0].clip && fabs(up[0].in_sec - lo[0].in_sec) < 1e-12);
+
+    /* non-letters emit nothing */
+    CHECK(edit_plan_text("123 .,", paths, durs, 3, &c, cuts, 64) == 0);
+
+    /* unknown durations keep the configured span */
+    double unk[1] = { 0.0 };
+    const char *one[1] = { "/v/x.mp4" };
+    CHECK(edit_plan_text("z", one, unk, 1, &c, cuts, 64) == 1);
+    CHECK(fabs(cuts[0].span - c.span) < 1e-9);
+
+    /* short clips clamp the span to 90% duration */
+    double short_dur[1] = { 0.45 };
+    CHECK(edit_plan_text("z", one, short_dur, 1, &c, cuts, 64) == 1);
+    CHECK(fabs(cuts[0].span - 0.405) < 1e-9);
+
+    /* overflow guard */
+    CHECK(edit_plan_text("aaaa", paths, durs, 3, &c, cuts, 2) == -1);
+}
+
 int main(void)
 {
     test_rng_determinism();
@@ -174,6 +237,7 @@ int main(void)
     test_texture_label();
     test_env();
     test_frame_blend();
+    test_edit_plan();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

@@ -1,6 +1,7 @@
 #include "analysis.h"
 #include "av_render.h"
 #include "compose.h"
+#include "edit.h"
 #include "library.h"
 #include "omicron.h"
 #include "plan.h"
@@ -35,6 +36,11 @@ static void usage(const char *prog)
         "  av \"<edl>\" out.mp4 [--vedl F] [--arc t:g,...] [--vid DIR]\n"
         "     [--w W] [--h H] [--fps N]\n"
         "      render the visual edit of an EDL, muxed with <out>_audio.wav\n"
+        "  edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]\n"
+        "       [--span S] [--max N] [--edl FILE]\n"
+        "      text-driven silent video edit: stdin letters a..z pick clips\n"
+        "      ((v-1) mod pool, path-sorted), their position in the text sets\n"
+        "      the in-point (golden-ratio scatter); 0.432s slices, continuous\n"
         "  compose <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "          [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      full pipeline: libraries -> plan -> render -> master -> mp4\n"
@@ -355,6 +361,45 @@ static int cmd_av(int argc, char **argv)
     return av_render(edl, vedl, arc, audio_wav, vid, out, &o);
 }
 
+static int cmd_edit(int argc, char **argv)
+{
+    const char *out = NULL, *vid = NULL, *edl_dump = NULL;
+    int max_files = 1000;
+    AvOpts o;
+    av_opts_defaults(&o);
+    EditCfg ec;
+    edit_cfg_defaults(&ec);
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--vid") == 0 && i + 1 < argc) vid = argv[++i];
+        else if (strcmp(argv[i], "--edl") == 0 && i + 1 < argc) edl_dump = argv[++i];
+        else if (strcmp(argv[i], "--w") == 0 && i + 1 < argc) o.w = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--h") == 0 && i + 1 < argc) o.h = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) o.fps = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--span") == 0 && i + 1 < argc) ec.span = atof(argv[++i]);
+        else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_files = atoi(argv[++i]);
+        else if (argv[i][0] == '-') { fprintf(stderr, "gram edit: unknown option '%s'\n", argv[i]); return 1; }
+        else if (!out) out = argv[i];
+        else { fprintf(stderr, "gram edit: unexpected argument '%s'\n", argv[i]); return 1; }
+    }
+    if (!out) {
+        fprintf(stderr, "usage: gram edit out.mp4 [--vid DIR] [--w W] [--h H] "
+                        "[--fps N] [--span S] [--max N] [--edl FILE] < text\n");
+        return 1;
+    }
+
+    /* resolution order: --vid > $GRAM_VID > conf vid= > default pool */
+    GramConf conf = { 0 };
+    conf_load(&conf);
+    if (!vid) {
+        const char *env = getenv("GRAM_VID");
+        if (env && env[0]) vid = env;
+        else if (conf.vid && conf.vid[0]) vid = conf.vid;
+        else vid = "/mnt/data/recordings/video8";
+    }
+    return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -381,6 +426,7 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "plan") == 0) return cmd_plan_or_compose(argc, argv, 0);
     if (strcmp(argv[1], "compose") == 0) return cmd_plan_or_compose(argc, argv, 1);
     if (strcmp(argv[1], "av") == 0) return cmd_av(argc, argv);
+    if (strcmp(argv[1], "edit") == 0) return cmd_edit(argc, argv);
     usage(argv[0]);
     return 1;
 }

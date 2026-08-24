@@ -5,7 +5,7 @@ LDLIBS   = -lm
 
 SRC = src/util.c src/omicron.c src/analysis.c src/render.c \
       src/library.c src/plan.c src/visual.c src/av_render.c \
-      src/compose.c src/main.c
+      src/compose.c src/edit.c src/main.c
 OBJ = $(SRC:.c=.o)
 BIN = gram
 

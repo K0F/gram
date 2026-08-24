@@ -13,7 +13,7 @@
 
 #define TARGET_SAMPLE_RATE 48000
 #define TARGET_CHANNELS 2
-#define MAX_TRACKS 32
+#define MAX_TRACKS 256
 #define MAX_ARC 64
 
 typedef struct {

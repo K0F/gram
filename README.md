@@ -20,11 +20,26 @@ Structuralist avantgarde AV toolkit — merges three instruments into one:
               [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]
     gram av "<edl>" out.mp4 [--vedl F] [--arc t:g,...] [--vid DIR]
             [--w W] [--h H] [--fps N]
+    gram edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]
+              [--span S] [--max N] [--edl FILE]
     gram compose <style> [seed] [...same options as plan]
 
 Styles: `day | storm | drift | pulse | rupture`.
 Engines: `rng` (bit-exact michacka reproduction) or `omicron`
 (deterministic enumeration-driven structure, no randomness).
+
+## Text edits
+
+`edit` turns a string into a silent video edit — the text is the score:
+
+    echo "this is source string" | gram edit out.mp4 --edl out.edl
+
+Each letter a..z (= 1..26) picks one clip from the path-sorted video pool
+via `(v-1) mod pool` — the same letter always lands on the same clip. Its
+position among the text's letters sets the in-point inside that clip by
+golden-ratio scatter, so identical input yields a byte-identical EDL.
+Slices are 0.432 s (`--span S`), butt-joined continuously; non-letters
+are ignored. Output is a silent MP4.
 
 ## Audio/visual pipeline
 
@@ -37,7 +52,7 @@ then optionally renders video:
   `scope` = XY phosphor oscilloscope of the slice PCM,
   `wave` = envelope waveform strip. Operators become blend gestures:
   `+` additive, `-` difference, `x` multiply, `/` right-half split.
-- Frames are composited at 1280x720@30 and piped to ffmpeg
+- Frames are composited at PAL SD 720x576@25 and piped to ffmpeg
   (libx264 + AAC) muxed with the part's audio.
 
 ## Config
