@@ -41,9 +41,11 @@ long edit_plan_text(const char *text, char const *const *paths,
                     const double *durs, int n, const EditCfg *cfg,
                     EditCut *out, int out_cap);
 
-/* full pipeline: read stdin, scan vid_dir, render a silent mp4.
+/* full pipeline: read stdin, scan vid_dir, render an mp4 muxed with the
+ * clips' original audio (mute=0) or silent (mute=1).
  * edl_dump (optional) writes the synthesized EDL next to the render. */
 int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
-             int w, int h, int fps, int max_files, const char *edl_dump);
+             int w, int h, int fps, int max_files, const char *edl_dump,
+             int mute);
 
 #endif

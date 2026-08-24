@@ -225,6 +225,18 @@ static void test_edit_plan(void)
 
     /* overflow guard */
     CHECK(edit_plan_text("aaaa", paths, durs, 3, &c, cuts, 2) == -1);
+
+    /* long texts plan fully: 1000 letters land back-to-back */
+    static char big[1001];
+    for (int i = 0; i < 1000; i++) big[i] = (char)('a' + i % 26);
+    big[1000] = 0;
+    static EditCut bigcuts[1000];
+    memset(bigcuts, 0, sizeof(bigcuts));
+    n = edit_plan_text(big, paths, durs, 3, &c, bigcuts, 1000);
+    CHECK(n == 1000);
+    CHECK(fabs(bigcuts[999].at - 999 * c.span) < 1e-6);
+    CHECK(fabs(bigcuts[999].in_sec -
+              fmod(999.0 * phi, 1.0) * (60.0 - c.span)) < 1e-6);
 }
 
 int main(void)

@@ -162,8 +162,213 @@ static char *read_stdin_all(void)
     return buf;
 }
 
+/* ------------------------------------------------------------------ */
+/* original-audio mixdown                                              */
+/*
+ * Each cut carries its source clip's own sound. Clips are decoded once
+ * (s16 stereo @48k) and cached under a byte budget; the mix is streamed
+ * chronologically — cuts are already in timeline order — so memory stays
+ * independent of the text length. Long mixes use Sony Wave64 (W64),
+ * which has no 4 GB ceiling.
+ */
+
+#define EDIT_AUDIO_BUDGET (768ull << 20)
+
+typedef struct {
+    char *path;
+    int16_t *pcm;      /* whole clip, interleaved s16 stereo */
+    uint64_t samples;  /* individual s16 values (frames * channels) */
+} ClipAudio;
+
+typedef struct {
+    ClipAudio *v;
+    int n, cap;
+    uint64_t bytes;
+} AudioCache;
+
+static ClipAudio *clip_audio(AudioCache *c, const char *path)
+{
+    for (int i = 0; i < c->n; i++)
+        if (strcmp(c->v[i].path, path) == 0) return &c->v[i];
+
+    TrackSpec spec;
+    memset(&spec, 0, sizeof(spec));
+    snprintf(spec.filepath, sizeof(spec.filepath), "%s", path);
+    uint32_t samples = 0;
+    int16_t *pcm = load_audio_slice(&spec, &samples, 1.0f, 1.0f);
+    if (!pcm || samples == 0) { free(pcm); return NULL; }
+
+    uint64_t bytes = (uint64_t)samples * sizeof(int16_t);
+    while (c->n > 0 && c->bytes + bytes > EDIT_AUDIO_BUDGET) {
+        free(c->v[0].path);
+        free(c->v[0].pcm);
+        c->bytes -= c->v[0].samples * sizeof(int16_t);
+        memmove(&c->v[0], &c->v[1], sizeof(ClipAudio) * (size_t)(c->n - 1));
+        c->n--;
+    }
+    if (c->n == c->cap) {
+        c->cap = c->cap ? c->cap * 2 : 16;
+        c->v = xrealloc(c->v, sizeof(ClipAudio) * (size_t)c->cap);
+    }
+    ClipAudio *ca = &c->v[c->n++];
+    ca->path = xstrdup(path);
+    ca->pcm = pcm;
+    ca->samples = samples;
+    c->bytes += bytes;
+    return ca;
+}
+
+static void put_u16(FILE *fp, unsigned v)
+{
+    fputc(v & 0xff, fp);
+    fputc((v >> 8) & 0xff, fp);
+}
+
+static void put_u32(FILE *fp, uint32_t v)
+{
+    put_u16(fp, v & 0xffff);
+    put_u16(fp, v >> 16);
+}
+
+static void put_u64(FILE *fp, uint64_t v)
+{
+    put_u32(fp, (uint32_t)(v & 0xffffffffu));
+    put_u32(fp, (uint32_t)(v >> 32));
+}
+
+/* Sony Wave64 GUIDs (little-endian serialization, as in ffmpeg's w64 demuxer) */
+static const unsigned char GUID_RIFF[] = {
+    'r','i','f','f', 0x2e,0x91,0xcf,0x11,0xa5,0xd6,0x28,0xdb,0x04,0xc1,0x00,0x00
+};
+static const unsigned char GUID_WAVE[] = {
+    'w','a','v','e', 0xf3,0xac,0xd3,0x11,0x8c,0xd1,0x00,0xc0,0x4f,0x8e,0xdb,0x8a
+};
+static const unsigned char GUID_FMT[] = {
+    'f','m','t',' ', 0xf3,0xac,0xd3,0x11,0x8c,0xd1,0x00,0xc0,0x4f,0x8e,0xdb,0x8a
+};
+static const unsigned char GUID_DATA[] = {
+    'd','a','t','a', 0xe1,0x56,0xd4,0x11,0x82,0x92,0x44,0xd4,0xac,0x12,0x3f,0x09,0x00,0x00
+};
+
+typedef struct {
+    FILE *fp;
+    int w64;
+    const char *path;
+} MixFile;
+
+static void mix_begin(MixFile *m, const char *path, int w64)
+{
+    m->fp = fopen(path, "wb");
+    m->w64 = w64;
+    m->path = path;
+    if (!m->fp) die("edit: cannot write %s", path);
+    setvbuf(m->fp, NULL, _IOFBF, 1 << 20);
+    if (w64) {
+        /* chunk sizes include their own 24-byte header (guid + size) */
+        fwrite(GUID_RIFF, 1, 16, m->fp);
+        put_u64(m->fp, 0);              /* offset 16: total file size */
+        fwrite(GUID_WAVE, 1, 16, m->fp);
+        fwrite(GUID_FMT, 1, 16, m->fp);
+        put_u64(m->fp, 40);             /* 24 header + 16 pcm-fmt bytes */
+        put_u16(m->fp, 1);              /* PCM */
+        put_u16(m->fp, TARGET_CHANNELS);
+        put_u32(m->fp, TARGET_SAMPLE_RATE);
+        put_u32(m->fp, TARGET_SAMPLE_RATE * TARGET_CHANNELS * 2);
+        put_u16(m->fp, TARGET_CHANNELS * 2);
+        put_u16(m->fp, 16);
+        fwrite(GUID_DATA, 1, 16, m->fp);
+        put_u64(m->fp, 24);             /* patched at end */
+    } else {
+        fwrite("RIFF", 1, 4, m->fp);
+        put_u32(m->fp, 0xffffffffu);    /* patched at end */
+        fwrite("WAVEfmt ", 1, 8, m->fp);
+        put_u32(m->fp, 16);
+        put_u16(m->fp, 1);              /* PCM */
+        put_u16(m->fp, TARGET_CHANNELS);
+        put_u32(m->fp, TARGET_SAMPLE_RATE);
+        put_u32(m->fp, TARGET_SAMPLE_RATE * TARGET_CHANNELS * 2);
+        put_u16(m->fp, TARGET_CHANNELS * 2);
+        put_u16(m->fp, 16);
+        fwrite("data", 1, 4, m->fp);
+        put_u32(m->fp, 0xffffffffu);    /* patched at end */
+    }
+}
+
+static void mix_finish(MixFile *m)
+{
+    long end = ftell(m->fp);
+    if (m->w64) {
+        fseek(m->fp, 16, SEEK_SET);
+        put_u64(m->fp, (uint64_t)end);
+        fseek(m->fp, 96, SEEK_SET);
+        put_u64(m->fp, (uint64_t)end - 80); /* data chunk: 24 header + payload */
+    } else {
+        uint64_t data = (uint64_t)end - 44;
+        fseek(m->fp, 4, SEEK_SET);
+        put_u32(m->fp, (uint32_t)(data + 36));
+        fseek(m->fp, 40, SEEK_SET);
+        put_u32(m->fp, (uint32_t)data);
+    }
+    fclose(m->fp);
+    printf("edit: audio mixed -> %s\n", m->path);
+}
+
+/* stream every cut's slice from its clip's own PCM, chronological order */
+static void edit_build_mix(const EditCut *cuts, long ncuts,
+                           char const *const *paths, AudioCache *cache,
+                           const char *out_mp4, char *path_out, size_t path_cap)
+{
+    /* <out>_audio.wav / .w64 next to the mp4 (gram av sidecar convention) */
+    char base[1024];
+    snprintf(base, sizeof(base), "%s", out_mp4);
+    size_t bl = strlen(base);
+    if (bl > 4 && strcmp(base + bl - 4, ".mp4") == 0) base[bl - 4] = 0;
+
+    uint64_t est_bytes = 0;
+    for (long i = 0; i < ncuts; i++)
+        est_bytes += (uint64_t)(cuts[i].span * TARGET_SAMPLE_RATE + 0.5) * 4;
+    int w64 = est_bytes >= 3500000000ull;
+
+    MixFile m;
+    char path[1100];
+    snprintf(path, sizeof(path), "%s_audio.%s", base, w64 ? "w64" : "wav");
+    snprintf(path_out, path_cap, "%s", path);
+    mix_begin(&m, path, w64);
+
+    static int16_t zero[2 * 4800]; /* silence padding, 0.05s per write */
+    memset(zero, 0, sizeof(zero));
+
+    for (long i = 0; i < ncuts; i++) {
+        const EditCut *cut = &cuts[i];
+        uint64_t frames = (uint64_t)((double)cut->span * TARGET_SAMPLE_RATE + 0.5);
+        ClipAudio *ca = clip_audio(cache, paths[cut->clip]);
+        uint64_t done = 0;
+        if (ca && ca->samples >= (uint64_t)TARGET_CHANNELS) {
+            uint64_t src_frame = (uint64_t)((double)cut->in_sec * TARGET_SAMPLE_RATE + 0.5);
+            uint64_t clip_frames = ca->samples / TARGET_CHANNELS;
+            if (src_frame < clip_frames) {
+                uint64_t avail = clip_frames - src_frame;
+                uint64_t copy = frames < avail ? frames : avail;
+                fwrite(ca->pcm + src_frame * TARGET_CHANNELS,
+                       sizeof(int16_t) * TARGET_CHANNELS, copy, m.fp);
+                done = copy;
+            }
+        }
+        while (done < frames) {
+            uint64_t chunk = frames - done;
+            if (chunk > sizeof(zero) / sizeof(zero[0]) / TARGET_CHANNELS)
+                chunk = sizeof(zero) / sizeof(zero[0]) / TARGET_CHANNELS;
+            fwrite(zero, sizeof(int16_t) * TARGET_CHANNELS, chunk, m.fp);
+            done += chunk;
+        }
+    }
+    mix_finish(&m);
+}
+
+
 int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
-             int w, int h, int fps, int max_files, const char *edl_dump)
+             int w, int h, int fps, int max_files, const char *edl_dump,
+             int mute)
 {
     if (!out_mp4 || !out_mp4[0]) die("edit: output .mp4 path required");
     if (!vid_dir || !vid_dir[0]) die("edit: no video dir (use --vid)");
@@ -178,12 +383,16 @@ int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
 
     char *text = read_stdin_all();
 
-    EditCut cuts[MAX_TRACKS];
+    /* pre-count letters so the cut table can live on the heap: texts are
+     * unbounded and one letter always yields exactly one cut */
+    long nletters = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++)
+        if (fold_letter(*p)) nletters++;
+    EditCut *cuts = xmalloc(sizeof(EditCut) * (size_t)(nletters > 0 ? nletters : 1));
     long ncuts = edit_plan_text(text, (char const *const *)paths, durs, n,
-                                cfg, cuts, MAX_TRACKS);
+                                cfg, cuts, nletters);
     free(text);
-    if (ncuts < 0)
-        die("edit: text yields more than %d cuts (max per render)", MAX_TRACKS);
+    if (ncuts != nletters) die("edit: planning failed (%ld/%ld)", ncuts, nletters);
     if (ncuts == 0) die("edit: no letters a..z found in input");
 
     Sb edl, vedl;
@@ -211,12 +420,28 @@ int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
     if (h > 0) o.h = h;
     if (fps > 0) o.fps = fps;
 
+    /* original clip audio: decode each used clip once, stream the slices
+     * chronologically into a wav sidecar; --mute falls back to -an */
+    const char *audio_wav = NULL;
+    AudioCache cache = { 0 };
+    char audio_path[1100];
+    if (!mute) {
+        printf("edit: mixing original clip audio\n");
+        edit_build_mix(cuts, ncuts, (char const *const *)paths, &cache,
+                       out_mp4, audio_path, sizeof(audio_path));
+        audio_wav = audio_path;
+    }
+
     printf("edit: rendering %ld cut(s) -> %s (%dx%d@%d)\n",
            ncuts, out_mp4, o.w, o.h, o.fps);
-    /* silent mp4: no audio wav, arc unused; clips stream directly from
-     * their own paths through the 'vfile' vedl generator */
-    int rc = av_render(edl.buf, vedl.buf, NULL, NULL, NULL, out_mp4, &o);
+    /* clips stream directly from their own paths through 'vfile' */
+    int rc = av_render(edl.buf, vedl.buf, NULL, audio_wav, NULL, out_mp4, &o);
 
+    for (int i = 0; i < cache.n; i++) {
+        free(cache.v[i].path);
+        free(cache.v[i].pcm);
+    }
+    free(cache.v);
     for (int i = 0; i < n; i++) free(paths[i]);
     free(paths);
     free(durs);

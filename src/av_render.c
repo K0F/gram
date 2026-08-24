@@ -19,7 +19,7 @@
 
 void av_opts_defaults(AvOpts *o)
 {
-    o->w = 720;   /* PAL SD */
+    o->w = 932;   /* PAL-height raster, wide */
     o->h = 576;
     o->fps = 25;
 }
@@ -82,9 +82,8 @@ static void scan_video_dir(const char *dir, StrList *out)
 static void parse_vedl(const char *vedl, VEntry *entries, int n)
 {
     if (!vedl || !vedl[0]) return;
-    static char buf[16384];
-    strncpy(buf, vedl, sizeof(buf));
-    buf[sizeof(buf) - 1] = '\0';
+    char *buf = xmalloc(strlen(vedl) + 1);
+    strcpy(buf, vedl);
     char *save = NULL;
     for (char *line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
         int idx;
@@ -96,6 +95,7 @@ static void parse_vedl(const char *vedl, VEntry *entries, int n)
         snprintf(e->gen, sizeof(e->gen), "%.7s",
                  strcmp(gen, "file") == 0 ? "file" : gen);
     }
+    free(buf);
 }
 
 static void entry_start(VEntry *e, const AvOpts *o)
@@ -188,11 +188,15 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     char *edl_buf = xmalloc(strlen(music_edl) + 1);
     strcpy(edl_buf, music_edl);
 
-    VEntry *entries = calloc(MAX_TRACKS, sizeof(VEntry));
-    if (!entries) die("out of memory");
-    int n = 0;
+    VEntry *entries = NULL;
+    int cap = 0, n = 0;
     char *tok = strtok(edl_buf, ",");
-    while (tok && n < MAX_TRACKS) {
+    while (tok) {
+        if (n == cap) {
+            cap = cap ? cap * 2 : 256;
+            entries = xrealloc(entries, sizeof(VEntry) * (size_t)cap);
+            memset(entries + n, 0, sizeof(VEntry) * (size_t)(cap - n));
+        }
         parse_track_spec(tok, &entries[n].spec);
         entries[n].op = '+';
         snprintf(entries[n].gen, sizeof(entries[n].gen), "wave");
@@ -275,25 +279,43 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     Frame *master = frame_new(W, H);
     Frame *src = frame_new(W, H);
 
-    VEntry *sorted[MAX_TRACKS];
+    VEntry **sorted = xmalloc(sizeof(VEntry *) * (size_t)n);
     for (int i = 0; i < n; i++) sorted[i] = &entries[i];
     qsort(sorted, (size_t)n, sizeof(VEntry *), cmp_entry_ptr);
+
+    /* active-window scheduler: layers come off the at-sorted array through
+     * a monotonic cursor, ended layers are filtered out stably. Per-frame
+     * cost is proportional to concurrent layers, not to the cut count,
+     * which keeps huge text edits feasible. Blend order equals the old
+     * full-scan order: sorted by (at, index) among started layers. */
+    VEntry **act = xmalloc(sizeof(VEntry *) * (size_t)n);
+    int nact = 0;
+    long long next_start = 0;
 
     for (long long fidx = 0; fidx < nframes; fidx++) {
         double t = (double)fidx / FPS;
 
-        for (int i = 0; i < n; i++) {
-            VEntry *e = sorted[i];
-            int should = t >= e->at && t < e->at + e->span;
-            if (should && !e->active) entry_start(e, opts);
-            else if (!should && e->active) entry_stop(e);
+        while (next_start < n && sorted[next_start]->at <= t) {
+            VEntry *e = sorted[next_start++];
+            if (t < e->at + e->span && !e->active) {
+                entry_start(e, opts);
+                act[nact++] = e;
+            }
         }
+        int w = 0;
+        for (int i = 0; i < nact; i++) {
+            VEntry *e = act[i];
+            if (t >= e->at + e->span)
+                entry_stop(e);
+            else
+                act[w++] = e;
+        }
+        nact = w;
 
         frame_clear(master, 2, 2, 4);
 
-        for (int i = 0; i < n; i++) {
-            VEntry *e = sorted[i];
-            if (!e->active) continue;
+        for (int i = 0; i < nact; i++) {
+            VEntry *e = act[i];
             double local = t - e->at;
 
             if (e->vpipe) {
@@ -350,6 +372,8 @@ int av_render(const char *music_edl, const char *vedl, const char *arc_str,
     frame_free(src);
     for (int i = 0; i < n; i++) entry_stop(&entries[i]);
     free(entries);
+    free(sorted);
+    free(act);
     free(edl_buf);
     if (rc != 0) fprintf(stderr, "gram av: encoder exited %d\n", rc);
     printf("av rendered -> %s\n", out_mp4);

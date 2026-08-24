@@ -37,10 +37,11 @@ static void usage(const char *prog)
         "     [--w W] [--h H] [--fps N]\n"
         "      render the visual edit of an EDL, muxed with <out>_audio.wav\n"
         "  edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]\n"
-        "       [--span S] [--max N] [--edl FILE]\n"
-        "      text-driven silent video edit: stdin letters a..z pick clips\n"
+        "       [--span S] [--max N] [--edl FILE] [--mute]\n"
+        "      text-driven video edit: stdin letters a..z pick clips\n"
         "      ((v-1) mod pool, path-sorted), their position in the text sets\n"
-        "      the in-point (golden-ratio scatter); 0.432s slices, continuous\n"
+        "      the in-point (golden-ratio scatter); 0.432s slices, continuous,\n"
+        "      muxed with the clips' original audio (--mute for silent)\n"
         "  compose <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "          [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      full pipeline: libraries -> plan -> render -> master -> mp4\n"
@@ -364,7 +365,7 @@ static int cmd_av(int argc, char **argv)
 static int cmd_edit(int argc, char **argv)
 {
     const char *out = NULL, *vid = NULL, *edl_dump = NULL;
-    int max_files = 1000;
+    int max_files = 1000, mute = 0;
     AvOpts o;
     av_opts_defaults(&o);
     EditCfg ec;
@@ -378,13 +379,14 @@ static int cmd_edit(int argc, char **argv)
         else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) o.fps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--span") == 0 && i + 1 < argc) ec.span = atof(argv[++i]);
         else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_files = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (argv[i][0] == '-') { fprintf(stderr, "gram edit: unknown option '%s'\n", argv[i]); return 1; }
         else if (!out) out = argv[i];
         else { fprintf(stderr, "gram edit: unexpected argument '%s'\n", argv[i]); return 1; }
     }
     if (!out) {
         fprintf(stderr, "usage: gram edit out.mp4 [--vid DIR] [--w W] [--h H] "
-                        "[--fps N] [--span S] [--max N] [--edl FILE] < text\n");
+                        "[--fps N] [--span S] [--max N] [--edl FILE] [--mute] < text\n");
         return 1;
     }
 
@@ -397,7 +399,7 @@ static int cmd_edit(int argc, char **argv)
         else if (conf.vid && conf.vid[0]) vid = conf.vid;
         else vid = "/mnt/data/recordings/video8";
     }
-    return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump);
+    return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump, mute);
 }
 
 int main(int argc, char **argv)
