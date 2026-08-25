@@ -410,8 +410,8 @@ static int cmd_edit(int argc, char **argv)
 static int cmd_slides(int argc, char **argv)
 {
     const char *out = NULL, *img = NULL, *fld = NULL;
-    int max_images = 0, mute = 0;
-    uint64_t seed = (uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32);
+    int max_images = 0, mute = 0, have_seed = 0;
+    uint64_t seed = 0;
     AvOpts o;
     av_opts_defaults(&o);
     double dur = SLIDES_DEFAULT_DUR;
@@ -423,7 +423,7 @@ static int cmd_slides(int argc, char **argv)
         else if (strcmp(argv[i], "--h") == 0 && i + 1 < argc) o.h = atoi(argv[++i]);
         else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) o.fps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--dur") == 0 && i + 1 < argc) dur = atof(argv[++i]);
-        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = strtoull(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) { seed = strtoull(argv[++i], NULL, 10); have_seed = 1; }
         else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_images = atoi(argv[++i]);
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
         else if (argv[i][0] == '-') { fprintf(stderr, "gram slides: unknown option '%s'\n", argv[i]); return 1; }
@@ -434,6 +434,11 @@ static int cmd_slides(int argc, char **argv)
         fprintf(stderr, "usage: gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] "
                         "[--fps N] [--dur S] [--seed N] [--max N] [--mute]\n");
         return 1;
+    }
+
+    if (!have_seed) {
+        seed = (uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32);
+        printf("slides: seed %llu\n", (unsigned long long)seed);
     }
 
     if (!fld) {
