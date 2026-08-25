@@ -3,6 +3,7 @@
 #include "compose.h"
 #include "edit.h"
 #include "library.h"
+#include "slides.h"
 #include "omicron.h"
 #include "plan.h"
 #include "render.h"
@@ -42,11 +43,15 @@ static void usage(const char *prog)
         "      ((v-1) mod pool, path-sorted), their position in the text sets\n"
         "      the in-point (golden-ratio scatter); 0.432s slices, continuous,\n"
         "      muxed with the clips' original audio (--mute for silent)\n"
+        "  slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]\n"
+        "       [--dur S] [--seed N] [--max N] [--mute]\n"
+        "      JPEG slideshow: crop/fill to format, grayscale, shuffled,\n"
+        "      muxed with field recordings; 0.432s per slide by default\n"
         "  compose <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "          [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      full pipeline: libraries -> plan -> render -> master -> mp4\n"
         "\n"
-        "styles: day | storm | drift | pulse | rupture\n"
+        "styles: day | storm | drift | pulse | rupture | strata\n"
         "config: ~/.config/gram.conf (mus= fld= vid=), falls back to michacka.conf;\n"
         "env GRAM_MUS / GRAM_FLD / GRAM_VID override.\n",
         prog);
@@ -211,7 +216,7 @@ static void plan_arg(PlanCfg *cfg, ComposeCfg *cc, const char *flag,
         /* positional */
         if (*pos_args == 0) {
             int s = plan_style_by_name(arg);
-            if (s < 0) die("unknown style '%s' (day|storm|drift|pulse|rupture)", arg);
+            if (s < 0) die("unknown style '%s' (day|storm|drift|pulse|rupture|strata)", arg);
             cfg->style = s;
         } else if (*pos_args == 1) {
             char *end;
@@ -402,6 +407,48 @@ static int cmd_edit(int argc, char **argv)
     return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump, mute);
 }
 
+static int cmd_slides(int argc, char **argv)
+{
+    const char *out = NULL, *img = NULL, *fld = NULL;
+    int max_images = 0, mute = 0;
+    uint64_t seed = (uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32);
+    AvOpts o;
+    av_opts_defaults(&o);
+    double dur = SLIDES_DEFAULT_DUR;
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--img") == 0 && i + 1 < argc) img = argv[++i];
+        else if (strcmp(argv[i], "--fld") == 0 && i + 1 < argc) fld = argv[++i];
+        else if (strcmp(argv[i], "--w") == 0 && i + 1 < argc) o.w = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--h") == 0 && i + 1 < argc) o.h = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) o.fps = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--dur") == 0 && i + 1 < argc) dur = atof(argv[++i]);
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = strtoull(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_images = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--mute") == 0) mute = 1;
+        else if (argv[i][0] == '-') { fprintf(stderr, "gram slides: unknown option '%s'\n", argv[i]); return 1; }
+        else if (!out) out = argv[i];
+        else { fprintf(stderr, "gram slides: unexpected argument '%s'\n", argv[i]); return 1; }
+    }
+    if (!out || !img) {
+        fprintf(stderr, "usage: gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] "
+                        "[--fps N] [--dur S] [--seed N] [--max N] [--mute]\n");
+        return 1;
+    }
+
+    if (!fld) {
+        const char *env = getenv("GRAM_FLD");
+        if (env && env[0]) fld = env;
+        else {
+            GramConf conf = { 0 };
+            conf_load(&conf);
+            if (conf.fld && conf.fld[0]) fld = conf.fld;
+            else fld = "/mnt/data/recordings/field";
+        }
+    }
+    return slides_run(img, fld, out, o.w, o.h, o.fps, dur, seed, max_images, mute);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -429,6 +476,7 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "compose") == 0) return cmd_plan_or_compose(argc, argv, 1);
     if (strcmp(argv[1], "av") == 0) return cmd_av(argc, argv);
     if (strcmp(argv[1], "edit") == 0) return cmd_edit(argc, argv);
+    if (strcmp(argv[1], "slides") == 0) return cmd_slides(argc, argv);
     usage(argv[0]);
     return 1;
 }
