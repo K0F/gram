@@ -5,7 +5,7 @@ Structuralist avantgarde AV toolkit — merges three instruments into one:
 - **tj** — offline EDL mixdown engine (48k stereo WAV, tempo/keylock/snapping,
   arc mastering). EDL strings are fully tj-compatible.
 - **michacka** — stochastic composition planner over texture roles
-  (ambient / motion / pulse), five styles, movement arcs.
+  (ambient / motion / pulse), six styles, movement arcs.
 - **OperatorOmikron** — combinatorial operator enumeration (`a..z = 1..26`,
   ops `+ - x /`) repurposed as a *structure driver*: expressions become
   slice points, spans, volumes, fades, blend gestures.
@@ -22,9 +22,13 @@ Structuralist avantgarde AV toolkit — merges three instruments into one:
             [--w W] [--h H] [--fps N]
     gram edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]
               [--span S] [--max N] [--edl FILE]
+    gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]
+              [--dur S] [--seed N] [--max N] [--mute]
     gram compose <style> [seed] [...same options as plan]
 
-Styles: `day | storm | drift | pulse | rupture`.
+Styles: `day | storm | drift | pulse | rupture | strata`.
+`strata` is heavy multilayering: spans derive from slot width so 3–4
+tracks (music + field recordings as equal co-stars) always overlap.
 Engines: `rng` (bit-exact michacka reproduction) or `omicron`
 (deterministic enumeration-driven structure, no randomness).
 
@@ -40,6 +44,18 @@ position among the text's letters sets the in-point inside that clip by
 golden-ratio scatter, so identical input yields a byte-identical EDL.
 Slices are 0.432 s (`--span S`), butt-joined continuously; non-letters
 are ignored. Output is a silent MP4.
+
+## Slides
+
+`slides` crop/fills JPEGs to the output resolution, converts to grayscale,
+shuffles with the RNG, and muxes with field recordings as audio:
+
+    gram slides out.mp4 --img /path/to/jpegs --seed 42
+
+Each image is scaled proportionally to the target width, center-cropped to
+height, converted to BT.601 grayscale, and held for 0.432 s (`--dur S`).
+Field recordings from `--fld DIR` (or `$GRAM_FLD` / `fld=` in config) are
+concatenated and muxed as audio (`--mute` for silent output).
 
 ## Audio/visual pipeline
 

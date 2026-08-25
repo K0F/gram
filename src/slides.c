@@ -71,8 +71,8 @@ static int decode_image(const char *path, uint8_t *out, int W, int H)
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
              "ffmpeg -v quiet -i \"%s\" -f rawvideo -pix_fmt rgb24 "
-             "-vf scale=%d:%d -",
-             path, W, H);
+             "-vf scale=%d:-1,crop=%d:%d -",
+             path, W, W, H);
     FILE *fp = popen(cmd, "r");
     if (!fp) return -1;
     size_t want = (size_t)W * H * 3;
