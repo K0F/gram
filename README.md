@@ -1,6 +1,6 @@
 # gram
 
-Structuralist avantgarde AV toolkit — merges three instruments into one:
+Structuralist A/V toolkit — merges three instruments into one:
 
 - **tj** — offline EDL mixdown engine (48k stereo WAV, tempo/keylock/snapping,
   arc mastering). EDL strings are fully tj-compatible.
