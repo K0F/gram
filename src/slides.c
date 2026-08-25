@@ -133,16 +133,18 @@ int slides_run(const char *img_dir, const char *fld_dir, const char *out_mp4,
     shuffle_ints(order, nimg);
 
     /* decode + render frames */
-    long long nframes = (long long)((double)nimg * dur * fps + 0.5);
+    double total_dur = (double)nimg * dur;
+    long long nframes = (long long)(total_dur * fps + 0.5);
     printf("slides: %d images, %.3fs each, %lld frames -> %s (%dx%d@%d)\n",
            nimg, dur, nframes, out_mp4, w, h, fps);
 
-    /* encoder pipeline */
+    /* encoder pipeline — -shortest stops at last frame, no repeats */
     char outcmd[4096];
     snprintf(outcmd, sizeof(outcmd),
              "ffmpeg -v warning -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %d -i - "
-             "-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -an \"%s\"",
-             w, h, fps, out_mp4);
+             "-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -an "
+             "-t %.3f \"%s\"",
+             w, h, fps, total_dur, out_mp4);
     FILE *enc = popen(outcmd, "w");
     if (!enc) die("slides: cannot start ffmpeg encoder");
 
