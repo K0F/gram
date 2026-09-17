@@ -45,15 +45,22 @@ static void usage(const char *prog)
         "      muxed with the clips' original audio (--mute for silent)\n"
         "  slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]\n"
         "       [--dur S] [--seed N] [--max N] [--mute]\n"
-        "      JPEG slideshow: crop/fill to format, grayscale, shuffled,\n"
-        "      muxed with field recordings; 0.432s per slide by default\n"
+        "       [--dada] [--title T] [--title-slots N] [--title-px P]\n"
+        "       [--stone FILE] [--dada-bin PATH]\n"
+        "      picture slideshow: crop/fill to format, grayscale, shuffled,\n"
+        "      muxed with field recordings; 0.432s per slide by default.\n"
+        "      --dada: deterministic stone-oracle film, exact 60s\n"
+        "  dada out.mp4 [--img DIR] [--title T] [--title-slots N] [--title-px P]\n"
+        "      the committed dada film (60s, 932x576@25, 0.216s slides, kof26\n"
+        "      title over the noise stone, B&W Camera pictures, dense field mix)\n"
+        "      — byte-for-byte reproducible from the same inputs\n"
         "  compose <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "          [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      full pipeline: libraries -> plan -> render -> master -> mp4\n"
         "\n"
         "styles: day | storm | drift | pulse | rupture | strata\n"
-        "config: ~/.config/gram.conf (mus= fld= vid=), falls back to michacka.conf;\n"
-        "env GRAM_MUS / GRAM_FLD / GRAM_VID override.\n",
+        "config: ~/.config/gram.conf (mus= fld= vid= img=), falls back to michacka.conf;\n"
+        "env GRAM_MUS / GRAM_FLD / GRAM_VID / GRAM_IMG override.\n",
         prog);
 }
 
@@ -61,7 +68,7 @@ static void usage(const char *prog)
 /* config                                                              */
 
 typedef struct {
-    char *mus, *fld, *vid;
+    char *mus, *fld, *vid, *img;
 } GramConf;
 
 static void conf_load(GramConf *c)
@@ -105,8 +112,9 @@ static void conf_load(GramConf *c)
         if (strcmp(key, "mus") == 0) c->mus = xstrdup(exp);
         else if (strcmp(key, "fld") == 0) c->fld = xstrdup(exp);
         else if (strcmp(key, "vid") == 0) c->vid = xstrdup(exp);
+        else if (strcmp(key, "img") == 0) c->img = xstrdup(exp);
         else if (strcmp(key, "tj") == 0) { /* legacy key, engine is internal now */ }
-        else die("%s: unknown key '%s' (expected mus|fld|vid|tj)", path, key);
+        else die("%s: unknown key '%s' (expected mus|fld|vid|img|tj)", path, key);
     }
     fclose(fp);
 }
@@ -407,14 +415,15 @@ static int cmd_edit(int argc, char **argv)
     return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump, mute);
 }
 
-static int cmd_slides(int argc, char **argv)
+static int cmd_slides(int argc, char **argv, const SlidesOpts *preset)
 {
     const char *out = NULL, *img = NULL, *fld = NULL;
     int max_images = 0, mute = 0, have_seed = 0;
     uint64_t seed = 0;
     AvOpts o;
     av_opts_defaults(&o);
-    double dur = SLIDES_DEFAULT_DUR;
+    double dur = preset ? 0.216 : SLIDES_DEFAULT_DUR;
+    SlidesOpts so = preset ? *preset : (SlidesOpts){ 0 };
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--img") == 0 && i + 1 < argc) img = argv[++i];
@@ -426,13 +435,25 @@ static int cmd_slides(int argc, char **argv)
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) { seed = strtoull(argv[++i], NULL, 10); have_seed = 1; }
         else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_images = atoi(argv[++i]);
         else if (strcmp(argv[i], "--mute") == 0) mute = 1;
+        else if (strcmp(argv[i], "--dada") == 0) so.dada = 1;
+        else if (strcmp(argv[i], "--title") == 0 && i + 1 < argc) so.title = argv[++i];
+        else if (strcmp(argv[i], "--title-slots") == 0 && i + 1 < argc) so.title_slots = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--title-px") == 0 && i + 1 < argc) so.title_px = atof(argv[++i]);
+        else if (strcmp(argv[i], "--stone") == 0 && i + 1 < argc) so.stone = argv[++i];
+        else if (strcmp(argv[i], "--dada-bin") == 0 && i + 1 < argc) so.dada_bin = argv[++i];
         else if (argv[i][0] == '-') { fprintf(stderr, "gram slides: unknown option '%s'\n", argv[i]); return 1; }
         else if (!out) out = argv[i];
         else { fprintf(stderr, "gram slides: unexpected argument '%s'\n", argv[i]); return 1; }
     }
     if (!out || !img) {
         fprintf(stderr, "usage: gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] "
-                        "[--fps N] [--dur S] [--seed N] [--max N] [--mute]\n");
+                        "[--fps N] [--dur S] [--seed N] [--max N] [--mute]\n"
+                        "  --dada           deterministic stone-oracle film (60s)\n"
+                        "  --title T        opening title text (drawn over the stone)\n"
+                        "  --title-slots N  title card length in slides (default 6)\n"
+                        "  --title-px P     title cap height (default 12)\n"
+                        "  --stone FILE     stone image (default dada/noise.png)\n"
+                        "  --dada-bin PATH  dada binary (default exe/dada/dada)\n");
         return 1;
     }
 
@@ -448,14 +469,77 @@ static int cmd_slides(int argc, char **argv)
             GramConf conf = { 0 };
             conf_load(&conf);
             if (conf.fld && conf.fld[0]) fld = conf.fld;
-            else fld = "/mnt/data/recordings/field";
+            else fld = "/mnt/kof17/recordings/field";
         }
     }
-    return slides_run(img, fld, out, o.w, o.h, o.fps, dur, seed, max_images, mute);
+    return slides_run(img, fld, out, o.w, o.h, o.fps, dur, seed, max_images, mute, &so);
+}
+
+/* `gram dada` — the committed film: exact 60s, 932x576@25, 0.216s slides,
+ * kof26 opening title over the noise stone, pictures from the B&W film
+ * scans in ~/DCIM/Kinofilm, dense field mix from fld. Reproduces
+ * byte-for-byte from the same inputs. */
+static int cmd_dada(int argc, char **argv)
+{
+    const char *img = NULL, *out = NULL;
+    int have_title = 0, mute = 0;
+    char title[128] = "kof26";
+    char slots[16] = "6", px[16] = "12";
+
+    GramConf conf = { 0 };
+    conf_load(&conf);
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--img") == 0 && i + 1 < argc) img = argv[++i];
+        else if (strcmp(argv[i], "--title") == 0 && i + 1 < argc) { snprintf(title, sizeof(title), "%s", argv[++i]); have_title = 1; }
+        else if (strcmp(argv[i], "--title-slots") == 0 && i + 1 < argc) snprintf(slots, sizeof(slots), "%s", argv[++i]);
+        else if (strcmp(argv[i], "--title-px") == 0 && i + 1 < argc) snprintf(px, sizeof(px), "%s", argv[++i]);
+        else if (strcmp(argv[i], "--mute") == 0) mute = 1;
+        else if (argv[i][0] == '-') { fprintf(stderr, "gram dada: unknown option '%s'\n", argv[i]); return 1; }
+        else if (!out) out = argv[i];
+        else { fprintf(stderr, "gram dada: unexpected argument '%s'\n", argv[i]); return 1; }
+    }
+    if (!out) {
+        fprintf(stderr, "usage: gram dada out.mp4 [--img DIR] [--title T] "
+                        "[--title-slots N] [--title-px P] [--mute]\n");
+        return 1;
+    }
+
+    const char *env = getenv("GRAM_IMG");
+    if (!img) img = env && env[0] ? env : NULL;
+    if (!img) img = conf.img;
+    if (!img) img = "/home/kof/DCIM/Kinofilm";
+    const char *fld = conf.fld ? conf.fld : "/mnt/kof17/recordings/field";
+
+    SlidesOpts so = {
+        .dada = 1,
+        .title_slots = atoi(slots),
+        .title = title,
+        .title_px = atof(px),
+    };
+
+    /* reuse the slides CLI with a preset of dada defaults;
+     * argv is shaped like `gram slides out.mp4 ...` (parse starts at 2) */
+    char *nargv[40];
+    int nargc = 0;
+    nargv[nargc++] = "gram";
+    nargv[nargc++] = "slides";
+    nargv[nargc++] = (char *)out;
+    nargv[nargc++] = "--img"; nargv[nargc++] = (char *)img;
+    nargv[nargc++] = "--fld"; nargv[nargc++] = (char *)fld;
+    nargv[nargc++] = "--dada";
+    if (!have_title) { nargv[nargc++] = "--title"; nargv[nargc++] = title; }
+    nargv[nargc++] = "--title-slots"; nargv[nargc++] = slots;
+    nargv[nargc++] = "--title-px"; nargv[nargc++] = px;
+    if (mute) nargv[nargc++] = "--mute";
+    nargv[nargc] = NULL;
+
+    return cmd_slides(nargc, nargv, &so);
 }
 
 int main(int argc, char **argv)
 {
+    setvbuf(stdout, NULL, _IOLBF, 0);
     if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
         usage(argv[0]);
         return argc < 2 ? 1 : 0;
@@ -481,7 +565,8 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "compose") == 0) return cmd_plan_or_compose(argc, argv, 1);
     if (strcmp(argv[1], "av") == 0) return cmd_av(argc, argv);
     if (strcmp(argv[1], "edit") == 0) return cmd_edit(argc, argv);
-    if (strcmp(argv[1], "slides") == 0) return cmd_slides(argc, argv);
+    if (strcmp(argv[1], "slides") == 0) return cmd_slides(argc, argv, NULL);
+    if (strcmp(argv[1], "dada") == 0) return cmd_dada(argc, argv);
     usage(argv[0]);
     return 1;
 }

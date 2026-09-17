@@ -5,11 +5,12 @@ LDLIBS   = -lm
 
 SRC = src/util.c src/omicron.c src/analysis.c src/render.c \
       src/library.c src/plan.c src/visual.c src/av_render.c \
-      src/compose.c src/edit.c src/slides.c src/main.c
+      src/compose.c src/edit.c src/slides.c src/gomfont.c src/main.c
 OBJ = $(SRC:.c=.o)
 BIN = gram
+DADA = dada/dada
 
-all: $(BIN)
+all: $(BIN) $(DADA)
 
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
@@ -18,6 +19,9 @@ $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(OBJ): src/util.h
+
+$(DADA):
+	$(MAKE) -C dada
 
 test: $(BIN)
 	$(CC) $(CFLAGS) -Isrc -o test_gram tests/test_gram.c $(filter-out src/main.c,$(SRC)) $(LDLIBS)
@@ -32,5 +36,6 @@ smoke-av: $(BIN)
 
 clean:
 	rm -f $(OBJ) $(BIN) test_gram
+	$(MAKE) -C dada clean 2>/dev/null || true
 
 .PHONY: all test smoke smoke-av clean
