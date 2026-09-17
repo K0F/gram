@@ -5,7 +5,7 @@ Structuralist A/V toolkit — merges three instruments into one:
 - **tj** — offline EDL mixdown engine (48k stereo WAV, tempo/keylock/snapping,
   arc mastering). EDL strings are fully tj-compatible.
 - **michacka** — stochastic composition planner over texture roles
-  (ambient / motion / pulse), six styles, movement arcs.
+  (ambient / motion / pulse), seven styles, movement arcs.
 - **OperatorOmikron** — combinatorial operator enumeration (`a..z = 1..26`,
   ops `+ - x /`) repurposed as a *structure driver*: expressions become
   slice points, spans, volumes, fades, blend gestures.
@@ -24,6 +24,10 @@ Structuralist A/V toolkit — merges three instruments into one:
               [--span S] [--max N] [--edl FILE]
     gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]
               [--dur S] [--seed N] [--max N] [--mute]
+              [--dada] [--title T] [--title-slots N] [--title-px P]
+              [--stone FILE] [--dada-bin PATH]
+    gram dada out.mp4 [--img DIR] [--title T] [--title-slots N] [--title-px P]
+              [--stone FILE] [--dada-bin PATH] [--mute]
     gram compose <style> [seed] [...same options as plan]
 
 Styles: `day | storm | drift | pulse | rupture | strata`.
@@ -57,6 +61,33 @@ height, converted to BT.601 grayscale, and held for 0.432 s (`--dur S`).
 Field recordings from `--fld DIR` (or `$GRAM_FLD` / `fld=` in config) are
 concatenated and muxed as audio (`--mute` for silent output).
 
+## The dada film
+
+`gram dada` is the committed, deterministic film: an exact 60 s run at
+932x576@25 with 0.216 s slides, an opening `kof26` title drawn in the
+embedded GoMotor stroke font over the noise stone, pictures from the B&W
+film scans in `~/DCIM/Kinofilm`, and a dense field-mix soundtrack.
+
+The stone image (`dada/noise.png`, committed with the `dada` oracle
+submodule) is the *only* source of randomness — every choice is derived
+from it, so identical inputs replay the film byte-for-byte:
+
+- picture for slide *n* is picked from the path-sorted pool as
+  `bytes(n) % poolsize` (same folder, same film; new files rerandomise);
+- the soundtrack is a deterministic 12-slice EDL mix from the field
+  recordings (`--fld DIR` or config), mastered and padded to 60 s
+  (`--mute` for silent).
+
+Run it as-is:
+
+    gram dada kf_film.mp4
+
+`slides --dada` is the same engine with the default 0.432 s slide length —
+useful for previews at small resolutions (`--w 64 --h 64 --mute`).
+`--title`, `--title-slots` (6), `--title-px` (12), `--stone` and
+`--dada-bin` (default: `exe/dada/dada`, then `dada/dada`, then `$PATH`,
+overridden by `$GRAM_DADA`) tune the run.
+
 ## Audio/visual pipeline
 
 `compose` scans libraries, analyzes them (cache shared in `~/.cache/tj`),
@@ -68,7 +99,7 @@ then optionally renders video:
   `scope` = XY phosphor oscilloscope of the slice PCM,
   `wave` = envelope waveform strip. Operators become blend gestures:
   `+` additive, `-` difference, `x` multiply, `/` right-half split.
-- Frames are composited at PAL SD 720x576@25 and piped to ffmpeg
+- Frames are composited at PAL SD 932x576@25 and piped to ffmpeg
   (libx264 + AAC) muxed with the part's audio.
 
 ## Config
@@ -78,12 +109,13 @@ then optionally renders video:
     mus=/home/kof/recordings
     fld=/mnt/data/recordings/field
     vid=/mnt/data/recordings/video8
+    img=/home/kof/DCIM/Kinofilm
 
-Env overrides: `GRAM_MUS`, `GRAM_FLD`, `GRAM_VID`.
+Env overrides: `GRAM_MUS`, `GRAM_FLD`, `GRAM_VID`, `GRAM_IMG`.
 
 ## Build
 
-    make            # bin: ./gram
+    make            # bin: ./gram (also builds the dada oracle submodule)
     make test       # unit tests
     make smoke      # omicron sanity
     make smoke-av   # tiny end-to-end AV render
