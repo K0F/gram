@@ -23,7 +23,7 @@
 #define MAX_EDL_ENTRIES 30
 #define PLAN_MARGIN 2.0
 
-enum { ST_DAY, ST_STORM, ST_DRIFT, ST_PULSE, ST_RUPTURE };
+enum { ST_DAY, ST_STORM, ST_DRIFT, ST_PULSE, ST_RUPTURE, ST_STRATA };
 enum { PLAN_ENGINE_RNG, PLAN_ENGINE_OMICRON };
 
 typedef struct {
@@ -40,6 +40,8 @@ typedef struct {
     int parity;
     int bpm;
     int keylock;
+    int layered;         /* strata: spans derive from slot width so 3-4
+                          * tracks always overlap; fields mix in as co-stars */
 } StyleSpec;
 
 typedef struct {

@@ -15,35 +15,42 @@ static const StyleSpec STYLES[] = {
       { {0.00f, 0}, {0.15f, 1}, {0.32f, 3}, {0.55f, 3}, {0.72f, 2}, {0.86f, 0}, {1.00f, 0} }, 7,
       { {0.00f, 2}, {0.38f, 3}, {0.62f, 3}, {0.85f, 2}, {1.00f, 3} }, 5,
       { {0.0f, 0.85f}, {0.5f, 1.0f}, {1.0f, 0.85f} }, 3,
-      { 14.0f, 28.0f }, { 16.0f, 28.0f }, 0, 0, 0 },
+      { 14.0f, 28.0f }, { 16.0f, 28.0f }, 0, 0, 0, 0 },
     { "storm", 2, 300.0f,
       { {0.0f, 1}, {1.0f, 1} }, 2,
       { {0.0f, 2}, {0.25f, 4}, {0.75f, 4}, {1.0f, 2} }, 4,
       { {0.0f, 1}, {0.15f, 4}, {0.85f, 4}, {1.0f, 2} }, 4,
       { {0.0f, 1}, {0.5f, 2}, {1.0f, 1} }, 3,
       { {0.0f, 0.6f}, {0.12f, 1.0f}, {0.82f, 1.0f}, {1.0f, 0.65f} }, 4,
-      { 3.0f, 6.0f }, { 4.0f, 8.0f }, 0, 0, 0 },
+      { 3.0f, 6.0f }, { 4.0f, 8.0f }, 0, 0, 0, 0 },
     { "drift", 1, 600.0f,
       { {0.0f, 2}, {1.0f, 2} }, 2,
       { {0.0f, 1}, {0.5f, 2}, {1.0f, 1} }, 3,
       { {0.0f, 0}, {1.0f, 0} }, 2,
       { {0.0f, 2}, {0.5f, 3}, {1.0f, 2} }, 3,
       { {0.0f, 0.8f}, {0.5f, 0.95f}, {1.0f, 0.8f} }, 3,
-      { 18.0f, 35.0f }, { 20.0f, 35.0f }, 0, 0, 0 },
+      { 18.0f, 35.0f }, { 20.0f, 35.0f }, 0, 0, 0, 0 },
     { "pulse", 1, 600.0f,
       { {0.0f, 1}, {1.0f, 1} }, 2,
       { {0.0f, 2}, {1.0f, 2} }, 2,
       { {0.0f, 3}, {0.15f, 5}, {0.9f, 4}, {1.0f, 3} }, 4,
       { {0.0f, 1}, {0.5f, 2}, {1.0f, 1} }, 3,
       { {0.0f, 0.7f}, {0.1f, 1.0f}, {0.92f, 1.0f}, {1.0f, 0.75f} }, 4,
-      { 4.0f, 8.0f }, { 5.0f, 10.0f }, 0, 1, 0 },
+      { 4.0f, 8.0f }, { 5.0f, 10.0f }, 0, 1, 0, 0 },
     { "rupture", 2, 300.0f,
       { {0.0f, 1}, {1.0f, 1} }, 2,
       { {0.0f, 2}, {0.5f, 3}, {1.0f, 2} }, 3,
       { {0.0f, 1}, {0.5f, 3}, {1.0f, 1} }, 3,
       { {0.0f, 1}, {0.5f, 2}, {1.0f, 1} }, 3,
       { {0.0f, 0.5f}, {0.1f, 1.0f}, {0.75f, 1.0f}, {1.0f, 0.6f} }, 4,
-      { 2.0f, 4.0f }, { 3.0f, 6.0f }, 1, 1, 1 },
+      { 2.0f, 4.0f }, { 3.0f, 6.0f }, 1, 1, 1, 0 },
+    { "strata", 1, 600.0f,
+      { {0.00f, 1}, {1.00f, 1} }, 2,
+      { {0.00f, 1}, {1.00f, 1} }, 2,
+      { {0.00f, 0}, {0.25f, 1}, {0.50f, 1}, {0.75f, 1}, {1.00f, 0} }, 5,
+      { {0.00f, 1}, {0.30f, 2}, {0.70f, 2}, {1.00f, 1} }, 4,
+      { {0.0f, 0.90f}, {0.12f, 1.0f}, {0.85f, 1.0f}, {1.0f, 0.88f} }, 4,
+      { 10.0f, 20.0f }, { 10.0f, 20.0f }, 0, 0, 1, 1 },
 };
 
 const StyleSpec *plan_style(int idx)
@@ -263,6 +270,168 @@ static int add_field_entries(Edl *edl, TrackList *fld, int want, double len, con
     return added;
 }
 
+/* ------------------------------------------------------------------ */
+/* strata: heavy multilayering, 3-4 tracks sounding at any moment      */
+
+#define STRATA_MAX_CHAINS 5
+#define STRATA_XFADE 2.5
+
+static int add_strata_entries(Edl *edl, TrackList *lib, int role, int want,
+                              double len, double slo, double shi,
+                              double vol_lo, double vol_hi,
+                              double fin_lo, double fin_hi,
+                              const char *gen, int *warned_no_role)
+{
+    if (want <= 0 || lib->n == 0) return 0;
+    int *order = xmalloc(sizeof(int) * (size_t)lib->n);
+    int avail = collect_roles(lib, role, order);
+    if (avail == 0) {
+        if (!*warned_no_role) {
+            fprintf(stderr, "gram: warning: no %s-role source found, layer skipped\n",
+                    role == ROLE_AMBIENT ? "ambient" : role == ROLE_MOTION ? "motion" : "pulse");
+            *warned_no_role = 1;
+        }
+        free(order);
+        return 0;
+    }
+    shuffle_ints(order, (size_t)avail);
+    double max_sp = len - PLAN_MARGIN;
+    double slot = len / (double)want;
+    int cont = role == ROLE_AMBIENT || role == ROLE_MOTION;
+    double target = role == ROLE_AMBIENT ? max_sp : slot;
+    if (shi > max_sp) shi = max_sp;
+    if (slo > shi) slo = shi;
+    if (slo < 3.0) slo = 3.0;
+    int pos = 0;
+    int added = 0;
+    for (int k = 0; k < want; k++) {
+        if (edl->count >= MAX_EDL_ENTRIES) break;
+        double head_vol = rnd_range(vol_lo, vol_hi);
+        double head_fin = rnd_range(fin_lo, fin_hi);
+        double head_fout = rnd_range(fin_lo, fin_hi);
+        double raw_at = (double)k * slot + rnd_range(-0.03, 0.03) * len;
+        double covered = 0.0;
+        double cur_at = raw_at;
+        int chains = 0;
+        int attempts = 0;
+        while (attempts < 12 && edl->count < MAX_EDL_ENTRIES) {
+            attempts++;
+            if (chains >= STRATA_MAX_CHAINS) break;
+            if (!cont && chains >= 1) break;
+            if (cont && covered >= target - 0.5) break;
+            if (pos >= avail) {
+                if (pos == 0) break;
+                pos = 0;
+            }
+            Track *t = &lib->v[order[pos]];
+            pos++;
+            double in_sec, sp;
+            if (!pick_slice(t, rnd_range(slo, shi), &in_sec, &sp)) continue;
+            if (sp > max_sp) {
+                sp = max_sp;
+                if (t->dur > 0.0 && in_sec > t->dur - sp) in_sec = t->dur > sp ? t->dur - sp : 0.0;
+            }
+            if (sp < 3.0) continue;
+            double vol = head_vol;
+            double fin, fout;
+            if (chains == 0) {
+                fin = head_fin;
+                fout = head_fout;
+            } else {
+                fin = fout = STRATA_XFADE;
+            }
+            double at;
+            if (chains == 0) {
+                at = role == ROLE_AMBIENT ? 0.0 : clampd(raw_at, 0.0, max_sp - sp);
+                cur_at = at;
+            } else {
+                at = cur_at;
+            }
+            if (at + sp > max_sp) sp = max_sp - at;
+            if (sp < 3.0) break;
+            edl_put(edl, "in%.1f out%.1f at%.1f v%.0f fin%.1f fout%.1f %s",
+                    in_sec, in_sec + sp, at, vol, fin, fout, t->path);
+            edl_vedl(edl, gen, 0);
+            added++;
+            double end = at + sp;
+            covered += sp - STRATA_XFADE;
+            cur_at += sp - STRATA_XFADE;
+            chains++;
+            if (!cont) break;
+            if (end >= max_sp - 0.5 || cur_at >= max_sp) break;
+        }
+    }
+    free(order);
+    return added;
+}
+
+static int add_strata_fields(Edl *edl, TrackList *fld, int want, double len)
+{
+    if (want <= 0 || fld->n == 0) return 0;
+    int *order = xmalloc(sizeof(int) * (size_t)fld->n);
+    for (int i = 0; i < fld->n; i++) order[i] = i;
+    shuffle_ints(order, (size_t)fld->n);
+    double max_sp = len - PLAN_MARGIN;
+    double slot = len / (double)want;
+    double slo = slot * 1.05, shi = slot * 1.55;
+    if (shi > max_sp) shi = max_sp;
+    if (slo > shi) slo = shi;
+    if (slo < 3.0) slo = 3.0;
+    int added = 0;
+    for (int k = 0; k < want; k++) {
+        if (edl->count >= MAX_EDL_ENTRIES) break;
+        double head_vol = rnd_range(-6.0, -1.0);
+        double head_fin = rnd_range(8.0, 18.0);
+        double head_fout = rnd_range(8.0, 18.0);
+        double raw_at = (double)k * slot + rnd_range(-0.02, 0.02) * len;
+        if (raw_at < 3.0) raw_at = 3.0;
+        double covered = 0.0;
+        double cur_at = raw_at;
+        int chains = 0;
+        int attempts = 0;
+        while (attempts < 12 && edl->count < MAX_EDL_ENTRIES) {
+            attempts++;
+            if (chains >= STRATA_MAX_CHAINS) break;
+            if (covered >= slot - 0.5) break;
+            Track *t = &fld->v[order[(k + chains) % fld->n]];
+            double in_sec, sp;
+            if (!pick_slice(t, rnd_range(slo, shi), &in_sec, &sp)) continue;
+            if (sp > max_sp) {
+                sp = max_sp;
+                if (t->dur > 0.0 && in_sec > t->dur - sp) in_sec = t->dur > sp ? t->dur - sp : 0.0;
+            }
+            if (sp < 3.0) continue;
+            double fin, fout;
+            if (chains == 0) {
+                fin = head_fin;
+                fout = head_fout;
+            } else {
+                fin = fout = 3.0;
+            }
+            double at;
+            if (chains == 0) {
+                at = clampd(raw_at, 0.0, max_sp - sp);
+                cur_at = at;
+            } else {
+                at = cur_at;
+            }
+            if (at + sp > max_sp) sp = max_sp - at;
+            if (sp < 3.0) break;
+            edl_put(edl, "in%.1f out%.1f at%.1f v%.0f fin%.1f fout%.1f %s",
+                    in_sec, in_sec + sp, at, head_vol, fin, fout, t->path);
+            edl_vedl(edl, "file", 0);
+            added++;
+            double end = at + sp;
+            covered += sp - 3.0;
+            cur_at += sp - 3.0;
+            chains++;
+            if (end >= max_sp - 0.5 || cur_at >= max_sp) break;
+        }
+    }
+    free(order);
+    return added;
+}
+
 static void build_arc(char *buf, size_t cap, const StyleSpec *st, double len)
 {
     size_t off = 0;
@@ -449,6 +618,172 @@ static int omicron_add_fields(Edl *edl, TrackList *fld, int want, double len, Sc
     return added;
 }
 
+static int omicron_add_strata(Edl *edl, TrackList *lib, int role, int want,
+                              double len, double slo, double shi,
+                              double vol_lo, double vol_hi,
+                              double fin_lo, double fin_hi,
+                              Score *sc, int *warned_no_role)
+{
+    if (want <= 0 || lib->n == 0) return 0;
+    int *pool = xmalloc(sizeof(int) * (size_t)lib->n);
+    int avail = collect_roles(lib, role, pool);
+    if (avail == 0) {
+        if (!*warned_no_role) {
+            fprintf(stderr, "gram: warning: no %s-role source found, layer skipped\n",
+                    role == ROLE_AMBIENT ? "ambient" : role == ROLE_MOTION ? "motion" : "pulse");
+            *warned_no_role = 1;
+        }
+        free(pool);
+        return 0;
+    }
+    sort_pool(lib, pool, avail);
+    double max_sp = len - PLAN_MARGIN;
+    double slot = len / (double)want;
+    int cont = role == ROLE_AMBIENT || role == ROLE_MOTION;
+    double target = role == ROLE_AMBIENT ? max_sp : slot;
+    if (shi > max_sp) shi = max_sp;
+    if (slo > shi) slo = shi;
+    if (slo < 3.0) slo = 3.0;
+    int added = 0;
+    for (int k = 0; k < want; k++) {
+        if (edl->count >= MAX_EDL_ENTRIES) break;
+        int op, letter;
+        double acc;
+        score_step(sc, &op, &acc, &letter);
+        double head_vol = vol_lo + (vol_hi - vol_lo) * (0.5 + 0.5 * squish(acc, 24.0));
+        double frac = fmod(fabs(acc) * PHI, 1.0);
+        double head_fin = fin_lo + (fin_hi - fin_lo) * frac;
+        double head_fout = head_fin;
+        switch (op) {
+        case 1: head_fin = head_fout = 1.0; break;
+        case 2: head_fout *= 1.6; break;
+        case 3: head_fin = head_fout = head_fin > 3.0 ? 3.0 : head_fin; break;
+        default: break;
+        }
+        double raw_at = (double)k * slot + 0.05 * len * squish(acc, 13.0);
+        double covered = 0.0;
+        double cur_at = raw_at;
+        int chains = 0;
+        while (chains < STRATA_MAX_CHAINS && edl->count < MAX_EDL_ENTRIES) {
+            if (!cont && chains >= 1) break;
+            if (cont && covered >= target - 0.5) break;
+            Track *t = &lib->v[pool[(letter - 2 + chains) % avail]];
+            double f2 = fmod(fabs(acc) * PHI * (3.0 + chains), 1.0);
+            double sp = slo + (shi - slo) * f2;
+            if (t->dur == 0.0) track_probe_duration(t);
+            double dur = t->dur > 0.0 ? t->dur : 30.0;
+            if (sp > dur * 0.9) sp = dur * 0.9;
+            if (sp > max_sp) sp = max_sp;
+            if (sp < 3.0) break;
+            double in_sec = fmod(fabs(acc) * PHI * (7.0 + chains * 3.0), 1.0) * (dur - sp);
+            if (in_sec < 0.0) in_sec = 0.0;
+            double vol = head_vol;
+            double fin, fout;
+            if (chains == 0) {
+                fin = head_fin;
+                fout = head_fout;
+            } else {
+                fin = fout = STRATA_XFADE;
+            }
+            double at;
+            if (chains == 0) {
+                at = role == ROLE_AMBIENT ? 0.0 : clampd(raw_at, 0.0, max_sp - sp);
+                cur_at = at;
+            } else {
+                at = cur_at;
+            }
+            if (at + sp > max_sp) sp = max_sp - at;
+            if (sp < 3.0) break;
+            edl_put(edl, "in%.1f out%.1f at%.1f v%.0f fin%.1f fout%.1f %s",
+                    in_sec, in_sec + sp, at, vol, fin, fout, t->path);
+            const char *gen = (op == 0 || op == 2) ? "file" : (op == 1 ? "wave" : "scope");
+            if (role == ROLE_AMBIENT)
+                gen = (op == 0) ? "wave" : "scope";
+            edl_vedl(edl, gen, op);
+            added++;
+            double end = at + sp;
+            covered += sp - STRATA_XFADE;
+            cur_at += sp - STRATA_XFADE;
+            chains++;
+            if (!cont) break;
+            if (end >= max_sp - 0.5 || cur_at >= max_sp) break;
+        }
+    }
+    free(pool);
+    return added;
+}
+
+static int omicron_add_strata_fields(Edl *edl, TrackList *fld, int want,
+                                     double len, Score *sc)
+{
+    if (want <= 0 || fld->n == 0) return 0;
+    int *pool = xmalloc(sizeof(int) * (size_t)fld->n);
+    for (int i = 0; i < fld->n; i++) pool[i] = i;
+    sort_pool(fld, pool, fld->n);
+    double max_sp = len - PLAN_MARGIN;
+    double slot = len / (double)want;
+    double slo = slot * 1.05, shi = slot * 1.55;
+    if (shi > max_sp) shi = max_sp;
+    if (slo > shi) slo = shi;
+    if (slo < 3.0) slo = 3.0;
+    int added = 0;
+    for (int k = 0; k < want; k++) {
+        if (edl->count >= MAX_EDL_ENTRIES) break;
+        int op, letter;
+        double acc;
+        score_step(sc, &op, &acc, &letter);
+        double head_vol = -6.0 + 5.0 * (0.5 + 0.5 * squish(acc, 24.0));
+        double frac = fmod(fabs(acc) * PHI, 1.0);
+        double head_fin = 8.0 + 10.0 * frac;
+        double head_fout = head_fin;
+        double raw_at = (double)k * slot + 0.03 * len * squish(acc, 13.0);
+        if (raw_at < 3.0) raw_at = 3.0;
+        double covered = 0.0;
+        double cur_at = raw_at;
+        int chains = 0;
+        while (chains < STRATA_MAX_CHAINS && edl->count < MAX_EDL_ENTRIES) {
+            if (covered >= slot - 0.5) break;
+            Track *t = &fld->v[pool[(letter - 2 + chains) % fld->n]];
+            double f2 = fmod(fabs(acc) * PHI * (5.0 + chains * 2.0), 1.0);
+            double sp = slo + (shi - slo) * f2;
+            if (t->dur == 0.0) track_probe_duration(t);
+            double dur = t->dur > 0.0 ? t->dur : 60.0;
+            if (sp > dur * 0.9) sp = dur * 0.9;
+            if (sp > max_sp) sp = max_sp;
+            if (sp < 3.0) break;
+            double in_sec = fmod(fabs(acc) * PHI * (11.0 + chains * 4.0), 1.0) * (dur - sp);
+            if (in_sec < 0.0) in_sec = 0.0;
+            double fin, fout;
+            if (chains == 0) {
+                fin = head_fin;
+                fout = head_fout;
+            } else {
+                fin = fout = 3.0;
+            }
+            double at;
+            if (chains == 0) {
+                at = clampd(raw_at, 0.0, max_sp - sp);
+                cur_at = at;
+            } else {
+                at = cur_at;
+            }
+            if (at + sp > max_sp) sp = max_sp - at;
+            if (sp < 3.0) break;
+            edl_put(edl, "in%.1f out%.1f at%.1f v%.0f fin%.1f fout%.1f %s",
+                    in_sec, in_sec + sp, at, head_vol, fin, fout, t->path);
+            edl_vedl(edl, "file", op);
+            added++;
+            double end = at + sp;
+            covered += sp - 3.0;
+            cur_at += sp - 3.0;
+            chains++;
+            if (end >= max_sp - 0.5 || cur_at >= max_sp) break;
+        }
+    }
+    free(pool);
+    return added;
+}
+
 static void build_arc_omicron(char *buf, size_t cap, const StyleSpec *st, double len, Score *sc)
 {
     size_t off = 0;
@@ -564,37 +899,80 @@ void plan_run(const PlanCfg *cfg, TrackList *mus, TrackList *fld, PlanResult *ou
         int budget = MAX_EDL_ENTRIES - 2;
         if (nb > budget) nb = budget;
         if (cfg->engine == PLAN_ENGINE_RNG) {
-            add_layered_entries(&m, mus, ROLE_AMBIENT, nb, part_len,
-                                part_len * 0.5, part_len * 0.75,
-                                -14.0, -10.0, st->fade_in[0], st->fade_out[1],
-                                "wave", &warned_bed);
-            budget -= m.count;
-            int nm2 = nm > budget ? budget : nm;
-            add_layered_entries(&m, mus, ROLE_MOTION, nm2, part_len,
-                                120.0, 260.0, -8.0, -4.0, 6.0, 12.0, "file", &warned_motion);
-            budget -= m.count;
-            int npp2 = npp > budget ? budget : npp;
-            add_layered_entries(&m, mus, ROLE_PULSE, npp2, part_len,
-                                50.0, 150.0, -7.0, -4.0, 4.0, 8.0, "scope", &warned_pulse);
+            if (!st->layered) {
+                add_layered_entries(&m, mus, ROLE_AMBIENT, nb, part_len,
+                                    part_len * 0.5, part_len * 0.75,
+                                    -14.0, -10.0, st->fade_in[0], st->fade_out[1],
+                                    "wave", &warned_bed);
+                budget -= m.count;
+                int nm2 = nm > budget ? budget : nm;
+                add_layered_entries(&m, mus, ROLE_MOTION, nm2, part_len,
+                                    120.0, 260.0, -8.0, -4.0, 6.0, 12.0, "file", &warned_motion);
+                budget -= m.count;
+                int npp2 = npp > budget ? budget : npp;
+                add_layered_entries(&m, mus, ROLE_PULSE, npp2, part_len,
+                                    50.0, 150.0, -7.0, -4.0, 4.0, 8.0, "scope", &warned_pulse);
+            } else {
+                add_strata_entries(&m, mus, ROLE_AMBIENT, nb, part_len,
+                                   part_len * 0.92, part_len * 1.08,
+                                   -14.0, -10.0, st->fade_in[0], st->fade_out[1],
+                                   "wave", &warned_bed);
+                budget -= m.count;
+                int nm2 = nm > budget ? budget : nm;
+                double mslot = part_len / (double)(nm2 > 0 ? nm2 : 1);
+                add_strata_entries(&m, mus, ROLE_MOTION, nm2, part_len,
+                                   mslot * 0.85, mslot * 1.15,
+                                   -8.0, -4.0, 6.0, 12.0, "file", &warned_motion);
+                budget -= m.count;
+                int npp2 = npp > budget ? budget : npp;
+                double pslot = part_len / (double)(npp2 > 0 ? npp2 : 1);
+                add_strata_entries(&m, mus, ROLE_PULSE, npp2, part_len,
+                                   pslot * 0.20, pslot * 0.38,
+                                   -7.0, -4.0, 4.0, 8.0, "scope", &warned_pulse);
+            }
         } else {
-            omicron_add_layered(&m, mus, ROLE_AMBIENT, nb, part_len,
-                                part_len * 0.5, part_len * 0.75,
-                                -14.0, -10.0, st->fade_in[0], st->fade_out[1],
-                                &score, &warned_bed);
-            omicron_add_layered(&m, mus, ROLE_MOTION, nm, part_len,
-                                120.0, 260.0, -8.0, -4.0, 6.0, 12.0,
-                                &score, &warned_motion);
-            omicron_add_layered(&m, mus, ROLE_PULSE, npp, part_len,
-                                50.0, 150.0, -7.0, -4.0, 4.0, 8.0,
-                                &score, &warned_pulse);
+            if (!st->layered) {
+                omicron_add_layered(&m, mus, ROLE_AMBIENT, nb, part_len,
+                                    part_len * 0.5, part_len * 0.75,
+                                    -14.0, -10.0, st->fade_in[0], st->fade_out[1],
+                                    &score, &warned_bed);
+                omicron_add_layered(&m, mus, ROLE_MOTION, nm, part_len,
+                                    120.0, 260.0, -8.0, -4.0, 6.0, 12.0,
+                                    &score, &warned_motion);
+                omicron_add_layered(&m, mus, ROLE_PULSE, npp, part_len,
+                                    50.0, 150.0, -7.0, -4.0, 4.0, 8.0,
+                                    &score, &warned_pulse);
+            } else {
+                omicron_add_strata(&m, mus, ROLE_AMBIENT, nb, part_len,
+                                   part_len * 0.92, part_len * 1.08,
+                                   -14.0, -10.0, st->fade_in[0], st->fade_out[1],
+                                   &score, &warned_bed);
+                double mslot = part_len / (double)(nm > 0 ? nm : 1);
+                omicron_add_strata(&m, mus, ROLE_MOTION, nm, part_len,
+                                   mslot * 0.85, mslot * 1.15,
+                                   -8.0, -4.0, 6.0, 12.0,
+                                   &score, &warned_motion);
+                double pslot = part_len / (double)(npp > 0 ? npp : 1);
+                omicron_add_strata(&m, mus, ROLE_PULSE, npp, part_len,
+                                   pslot * 0.20, pslot * 0.38,
+                                   -7.0, -4.0, 4.0, 8.0,
+                                   &score, &warned_pulse);
+            }
         }
 
         Edl f;
         edl_init(&f, 1);
-        if (cfg->engine == PLAN_ENGINE_RNG)
-            add_field_entries(&f, fld, nf, part_len, "file");
-        else
-            omicron_add_fields(&f, fld, nf, part_len, &score);
+        if (cfg->engine == PLAN_ENGINE_RNG) {
+            if (st->layered)
+                add_strata_fields(&f, fld, nf, part_len);
+            else
+                add_field_entries(&f, fld, nf, part_len, "file");
+        } else {
+            if (st->layered)
+                omicron_add_strata_fields(&f, fld, nf, part_len, &score);
+            else
+                omicron_add_fields(&f, fld, nf, part_len, &score);
+        }
 
         char arc[512];
         if (cfg->engine == PLAN_ENGINE_RNG)

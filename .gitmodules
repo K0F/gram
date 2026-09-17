@@ -7,3 +7,6 @@
 [submodule "OperatorOmikron"]
 	path = OperatorOmikron
 	url = git@github.com:K0F/OperatorOmikron.git
+[submodule "dada"]
+	path = dada
+	url = git@github.com:K0F/dada.git
