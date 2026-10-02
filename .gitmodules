@@ -10,3 +10,6 @@
 [submodule "dada"]
 	path = dada
 	url = git@github.com:K0F/dada.git
+[submodule "genmontage"]
+	path = genmontage
+	url = git@github.com:K0F/genmontage.git
