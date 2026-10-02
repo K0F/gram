@@ -11,27 +11,6 @@
 #include <string.h>
 #include <unistd.h>
 
-void compose_resolve_dirs(ComposeCfg *cc)
-{
-    char buf[1024];
-    if (!cc->plan.mus_dir) {
-        const char *env = getenv("GRAM_MUS");
-        const char *home = getenv("HOME");
-        snprintf(buf, sizeof(buf), "%s", env ? env : (home ? home : "."));
-        strncat(buf, "/recordings", sizeof(buf) - strlen(buf) - 1);
-        cc->plan.mus_dir = xstrdup(buf);
-    }
-    if (!cc->plan.fld_dir) {
-        const char *env = getenv("GRAM_FLD");
-        cc->plan.fld_dir = xstrdup(env ? env : "/mnt/data/recordings/field");
-    }
-    if (!cc->vid_dir[0]) {
-        const char *env = getenv("GRAM_VID");
-        snprintf(cc->vid_dir, sizeof(cc->vid_dir), "%s",
-                 env ? env : "/mnt/data/recordings/video8");
-    }
-}
-
 static void write_file(const char *path, const char *content)
 {
     FILE *fp = fopen(path, "w");
@@ -86,7 +65,9 @@ int compose_run(ComposeCfg *cc)
     PlanCfg *cfg = &cc->plan;
     /* caller must have run plan_cfg_defaults() before filling fields */
     const StyleSpec *st = plan_style(cfg->style);
-    compose_resolve_dirs(cc);
+    if (!cfg->mus_dir || !cfg->fld_dir || !cc->vid_dir[0])
+        die("compose: no library dirs configured — set mus= fld= vid= in the "
+            "central config (~/.config/gram.conf, or $GRAM_CONF)");
 
     if (!cfg->have_seed) {
         cfg->seed = (uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32);

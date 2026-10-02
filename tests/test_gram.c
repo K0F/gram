@@ -2,8 +2,10 @@
 #include "edit.h"
 #include "library.h"
 #include "omicron.h"
+#include "partition.h"
 #include "plan.h"
 #include "render.h"
+#include "title.h"
 #include "util.h"
 #include "visual.h"
 
@@ -239,6 +241,134 @@ static void test_edit_plan(void)
               fmod(999.0 * phi, 1.0) * (60.0 - c.span)) < 1e-6);
 }
 
+static void test_partition_lex(void)
+{
+    PTok toks[32];
+
+    int n = part_lex("pf 7 x 3", toks, 32);
+    CHECK(n == 5);                                  /* pf 7 x 3 EOF */
+    CHECK(toks[0].type == PT_VERB && strcmp(toks[0].word, "pf") == 0);
+    CHECK(toks[1].type == PT_NUM && toks[1].num == 7);
+    CHECK(toks[2].type == PT_X);
+    CHECK(toks[3].type == PT_NUM && toks[3].num == 3);
+    CHECK(toks[4].type == PT_EOF);
+
+    n = part_lex("H 4 2", toks, 32);
+    CHECK(n == 4);
+    CHECK(toks[0].type == PT_KW && strcmp(toks[0].word, "H") == 0);
+    CHECK(toks[1].type == PT_NUM && toks[1].num == 4);
+    CHECK(toks[2].type == PT_NUM && toks[2].num == 2);
+
+    /* comments drop to end of line; newline is a word boundary */
+    n = part_lex("pf 4 # hi\njf 2", toks, 32);
+    CHECK(n == 5);                                  /* pf 4 jf 2 EOF */
+    CHECK(strcmp(toks[2].word, "jf") == 0);
+    CHECK(toks[3].num == 2);
+
+    /* letter/digit mixed boundaries split words: "pf7" = pf, 7 */
+    n = part_lex("pf7", toks, 32);
+    CHECK(n == 3);
+    CHECK(toks[0].type == PT_VERB && strcmp(toks[0].word, "pf") == 0);
+    CHECK(toks[1].type == PT_NUM && toks[1].num == 7);
+
+    /* unknown words become ERR tokens, not rejects */
+    n = part_lex("zzz 9", toks, 32);
+    CHECK(n == 3);
+    CHECK(toks[0].type == PT_ERR && strcmp(toks[0].word, "zzz") == 0);
+    CHECK(toks[1].type == PT_NUM && toks[1].num == 9);
+
+    /* bare x is a repeat token */
+    n = part_lex("x", toks, 32);
+    CHECK(n == 2 && toks[0].type == PT_X);
+
+    /* token capacity overflow returns -1 (incl. EOF slot) */
+    CHECK(part_lex("pf 1 x 3", toks, 4) == -1);
+}
+
+static void test_partition_interp(void)
+{
+    PSeg seg[64];
+    long long lens[2] = { 50, 200 };
+    long long full[2] = { 50, 200 };
+    long long offs[2] = { 0, 50 };
+    long long l200[1] = { 200 }, f200[1] = { 200 }, o0[1] = { 0 };
+    PTok toks[32];
+
+    /* single virtual source, pattern mode */
+    {
+        CHECK(part_lex("pf 2 x 3", toks, 32) > 0);
+        int n = part_interp(toks, 5, lens, full, offs, 1, 0, 10, seg, 64);
+        CHECK(n == 3);
+        CHECK(seg[0].b == 0 && seg[0].e == 20);
+        CHECK(seg[1].b == 20 && seg[1].e == 40);
+        CHECK(seg[2].b == 40 && seg[2].e == 50);    /* clamped at end */
+    }
+
+    /* jf advances the playhead before pf emits */
+    {
+        CHECK(part_lex("jf 5 pf 3", toks, 32) > 0);
+        int n = part_interp(toks, 5, l200, f200, o0, 1, 0, 10, seg, 64);
+        CHECK(n == 1);
+        CHECK(seg[0].b == 50 && seg[0].e == 80);
+    }
+
+    /* jb clamps at the source start */
+    {
+        CHECK(part_lex("jf 2 jb 9 pf 99", toks, 32) > 0);
+        int n = part_interp(toks, 7, l200, f200, o0, 1, 0, 10, seg, 64);
+        CHECK(n == 1);
+        CHECK(seg[0].b == 0 && seg[0].e == 200);
+    }
+
+    /* script mode: open switches sources, combined offsets track them */
+    {
+        CHECK(part_lex("open 1 pf 2", toks, 32) > 0);
+        int n = part_interp(toks, 5, lens, full, offs, 2, 1, 10, seg, 64);
+        CHECK(n == 1);
+        CHECK(seg[0].b == 50 && seg[0].e == 70);
+    }
+
+    /* back-and-forth across two opened sources */
+    {
+        CHECK(part_lex("open 0 pf 1 open 1 pf 1", toks, 32) > 0);
+        int n = part_interp(toks, 9, lens, full, offs, 2, 1, 10, seg, 64);
+        CHECK(n == 2);
+        CHECK(seg[0].b == 0 && seg[0].e == 10);
+        CHECK(seg[1].b == 50 && seg[1].e == 60);
+    }
+
+    /* out-of-range open and missing-first-open are errors */
+    {
+        CHECK(part_lex("open 7 pf 1", toks, 32) > 0);
+        CHECK(part_interp(toks, 5, lens, full, offs, 2, 1, 10, seg, 64) == -1);
+        CHECK(part_lex("pf 1", toks, 32) > 0);
+        CHECK(part_interp(toks, 3, lens, full, offs, 2, 1, 10, seg, 64) == -1);
+    }
+
+    /* H harmonic crosscut: nsec x play = 8 one-unit cuts inside [0,200) */
+    {
+        CHECK(part_lex("H 4 2", toks, 32) > 0);
+        int n = part_interp(toks, 4, l200, f200, o0, 1, 0, 10, seg, 64);
+        CHECK(n == 8);
+        for (int i = 0; i < n; i++) {
+            CHECK(seg[i].b >= 0 && seg[i].e <= 200 && seg[i].b < seg[i].e);
+            if (i > 0) CHECK(seg[i].b >= seg[i - 1].b);
+        }
+    }
+}
+
+static void test_title_fit(void)
+{
+    int s = title_fit_size(932, 782.88f);           /* 100 * 0.84*932 / target */
+    CHECK(s == 100);
+    s = title_fit_size(932, 0.001f);                /* huge -> clamp high */
+    CHECK(s == 160);
+    s = title_fit_size(932, 1e9f);                  /* tiny -> clamp low */
+    CHECK(s == 24);
+    s = title_fit_size(64, 2000.0f);                /* 64px raster stays >= 24 */
+    CHECK(s >= 24 && s <= 160);
+}
+
 int main(void)
 {
     test_rng_determinism();
@@ -250,6 +380,9 @@ int main(void)
     test_env();
     test_frame_blend();
     test_edit_plan();
+    test_partition_lex();
+    test_partition_interp();
+    test_title_fit();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

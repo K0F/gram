@@ -5,12 +5,14 @@ LDLIBS   = -lm
 
 SRC = src/util.c src/omicron.c src/analysis.c src/render.c \
       src/library.c src/plan.c src/visual.c src/av_render.c \
-      src/compose.c src/edit.c src/slides.c src/gomfont.c src/main.c
+      src/compose.c src/edit.c src/slides.c src/gomfont.c \
+      src/flags.c src/title.c src/partition.c src/main.c
 OBJ = $(SRC:.c=.o)
 BIN = gram
 DADA = dada/dada
+GENMONTAGE = genmontage/genmontage
 
-all: $(BIN) $(DADA)
+all: $(BIN) $(DADA) $(GENMONTAGE)
 
 $(BIN): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
@@ -23,6 +25,9 @@ $(OBJ): src/util.h
 $(DADA):
 	$(MAKE) -C dada
 
+$(GENMONTAGE):
+	$(MAKE) -C genmontage genmontage
+
 test: $(BIN)
 	$(CC) $(CFLAGS) -Isrc -o test_gram tests/test_gram.c $(filter-out src/main.c,$(SRC)) $(LDLIBS)
 	./test_gram
@@ -34,8 +39,16 @@ smoke: $(BIN)
 smoke-av: $(BIN)
 	./$(BIN) compose day 777 --parts 1 --len 20 --out smoke_gram --max 12 --av
 
+demo:
+	rm -rf out
+	./demo/run.sh
+
+clean-render:
+	rm -rf out
+
 clean:
 	rm -f $(OBJ) $(BIN) test_gram
 	$(MAKE) -C dada clean 2>/dev/null || true
+	$(MAKE) -C genmontage clean 2>/dev/null || true
 
-.PHONY: all test smoke smoke-av clean
+.PHONY: all test smoke smoke-av demo clean-render clean

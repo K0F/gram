@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include "analysis.h"
+#include "flags.h"
 #include "util.h"
 
 #include <ctype.h>
@@ -391,77 +392,109 @@ void render_opts_defaults(RenderOpts *o)
     o->fade_out_default = FADE_OUT_SECONDS;
 }
 
-int render_opts_parse(int argc, char **argv, int start, RenderOpts *o)
+/* render's flag table — handlers so optional-value flags (--bpm, --keylock,
+ * --master) keep their exact historical semantics; the registry supplies
+ * "--flag value" and "--flag=value" spellings and the common core set. */
+static int h_bpm(void *ctx, const char *name, const char *val)
 {
-    for (int i = start; i < argc; i++) {
-        if (strcmp(argv[i], "--bpm") == 0) {
-            o->bpm_mode = 1;
-            if (i + 1 < argc && argv[i + 1][0] && isdigit((unsigned char)argv[i + 1][0])) {
-                o->fixed_bpm = atof(argv[++i]);
-                o->fixed = o->fixed_bpm > 0;
-            }
-        } else if (strncmp(argv[i], "--bpm=", 6) == 0) {
-            o->bpm_mode = 1;
-            o->fixed_bpm = atof(argv[i] + 6);
-            o->fixed = o->fixed_bpm > 0;
-        } else if (strcmp(argv[i], "--snap") == 0) {
-            o->snap = 1;
-        } else if (strcmp(argv[i], "--keylock") == 0) {
-            o->keylock = 1;
-            if (i + 1 < argc && argv[i + 1][0]
-                && (isalpha((unsigned char)argv[i + 1][0]) || isdigit((unsigned char)argv[i + 1][0]))) {
-                strncpy(o->keylock_target, argv[++i], sizeof(o->keylock_target) - 1);
-            }
-        } else if (strncmp(argv[i], "--keylock=", 10) == 0) {
-            o->keylock = 1;
-            strncpy(o->keylock_target, argv[i] + 10, sizeof(o->keylock_target) - 1);
-        } else if (strcmp(argv[i], "--fade-in") == 0 && i + 1 < argc) {
-            o->fade_in_default = atof(argv[++i]);
-        } else if (strncmp(argv[i], "--fade-in=", 10) == 0) {
-            o->fade_in_default = atof(argv[i] + 10);
-        } else if (strcmp(argv[i], "--fade-out") == 0 && i + 1 < argc) {
-            o->fade_out_default = atof(argv[++i]);
-        } else if (strncmp(argv[i], "--fade-out=", 11) == 0) {
-            o->fade_out_default = atof(argv[i] + 11);
-        } else if (strcmp(argv[i], "--arc") == 0 && i + 1 < argc) {
-            o->narc = render_parse_arc_str(argv[++i], o->arc, MAX_ARC);
-        } else if (strncmp(argv[i], "--arc=", 6) == 0) {
-            o->narc = render_parse_arc_str(argv[i] + 6, o->arc, MAX_ARC);
-        } else if (strcmp(argv[i], "--master") == 0) {
-            o->master_mode = 1;
+    RenderOpts *o = ctx;
+    (void)name;
+    o->bpm_mode = 1;
+    if (val && val[0] && isdigit((unsigned char)val[0])) {
+        o->fixed_bpm = atof(val);
+        o->fixed = o->fixed_bpm > 0;
+    }
+    return 0;
+}
+
+static int h_snap(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    if (val) return -1;
+    o->snap = 1;
+    return 0;
+}
+
+static int h_keylock(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    o->keylock = 1;
+    if (val && val[0] &&
+        (isalpha((unsigned char)val[0]) || isdigit((unsigned char)val[0])))
+        strncpy(o->keylock_target, val, sizeof(o->keylock_target) - 1);
+    return 0;
+}
+
+static int h_fade_in(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    if (!val) return -1;
+    o->fade_in_default = atof(val);
+    return 0;
+}
+
+static int h_fade_out(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    if (!val) return -1;
+    o->fade_out_default = atof(val);
+    return 0;
+}
+
+static int h_arc(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    if (!val) return -1;
+    o->narc = render_parse_arc_str(val, o->arc, MAX_ARC);
+    return 0;
+}
+
+static int h_master(void *ctx, const char *name, const char *val)
+{
+    RenderOpts *o = ctx;
+    (void)name;
+    o->master_mode = 1;
+    if (val && val[0]) {
+        if (strcmp(val, "pop") == 0) {
             snprintf(o->master_graph, sizeof(o->master_graph),
                      "acompressor=threshold=-18dB:ratio=3:attack=20:release=250:makeup=1,"
                      "stereotools=base=0.2,alimiter=limit=0.7071");
-            if (i + 1 < argc && argv[i + 1][0]) {
-                if (strcmp(argv[i + 1], "pop") == 0) {
-                    i++;
-                } else if (strcmp(argv[i + 1], "subtle") == 0) {
-                    i++;
-                    snprintf(o->master_graph, sizeof(o->master_graph),
-                             "acompressor=threshold=-12dB:ratio=2:attack=30:release=300,alimiter=limit=0.7071");
-                } else if (strchr(argv[i + 1], '=') || strchr(argv[i + 1], ',')) {
-                    snprintf(o->master_graph, sizeof(o->master_graph), "%s", argv[++i]);
-                }
-            }
-        } else if (strncmp(argv[i], "--master=", 9) == 0) {
-            o->master_mode = 1;
-            const char *arg = argv[i] + 9;
-            if (strcmp(arg, "pop") == 0) {
-                snprintf(o->master_graph, sizeof(o->master_graph),
-                         "acompressor=threshold=-18dB:ratio=3:attack=20:release=250:makeup=1,"
-                         "stereotools=base=0.2,alimiter=limit=0.7071");
-            } else if (strcmp(arg, "subtle") == 0) {
-                snprintf(o->master_graph, sizeof(o->master_graph),
-                         "acompressor=threshold=-12dB:ratio=2:attack=30:release=300,alimiter=limit=0.7071");
-            } else {
-                snprintf(o->master_graph, sizeof(o->master_graph), "%s", arg);
-            }
+        } else if (strcmp(val, "subtle") == 0) {
+            snprintf(o->master_graph, sizeof(o->master_graph),
+                     "acompressor=threshold=-12dB:ratio=2:attack=30:release=300,alimiter=limit=0.7071");
         } else {
-            fprintf(stderr, "gram render: unknown option '%s'\n", argv[i]);
-            return -1;
+            snprintf(o->master_graph, sizeof(o->master_graph), "%s", val);
         }
     }
     return 0;
+}
+
+static const FlagSpec RENDER_FLAGS[] = {
+    { "--bpm",      FLAG_CALL, NULL, h_bpm,      1 },
+    { "--snap",     FLAG_CALL, NULL, h_snap,     1 },
+    { "--keylock",  FLAG_CALL, NULL, h_keylock,  1 },
+    { "--fade-in",  FLAG_CALL, NULL, h_fade_in,  0 },
+    { "--fade-out", FLAG_CALL, NULL, h_fade_out, 0 },
+    { "--arc",      FLAG_CALL, NULL, h_arc,      0 },
+    { "--master",   FLAG_CALL, NULL, h_master,   1 },
+};
+
+int render_opts_parse(int argc, char **argv, int start, RenderOpts *o)
+{
+    CoreFlags core;
+    core_flags_defaults(&core);
+    char **pos = NULL;
+    int npos = 0;
+    int r = flags_parse(argc, argv, start,
+                        RENDER_FLAGS, (int)(sizeof(RENDER_FLAGS) / sizeof(RENDER_FLAGS[0])),
+                        o, &core, &pos, &npos);
+    free(pos);
+    return r < 0 ? -1 : 0;
 }
 
 int render_edl(const char *edl_src, const char *out_file, const RenderOpts *opts)

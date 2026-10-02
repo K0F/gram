@@ -210,9 +210,12 @@ static void concat_audio(char const *const *paths, int n,
     FILE *fp = fopen(list_path, "w");
     if (!fp) die("slides: cannot write %s", list_path);
     for (int i = 0; i < n; i++) {
-        char q[1024];
-        sh_quote(q, sizeof(q), paths[i]);
-        fprintf(fp, "file %s\n", q);
+        fprintf(fp, "file '");
+        for (const char *s = paths[i]; *s; s++) {
+            if (*s == '\'' || *s == '\\') fputc('\\', fp);
+            fputc(*s, fp);
+        }
+        fprintf(fp, "'\n");
     }
     fclose(fp);
 

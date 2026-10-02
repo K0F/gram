@@ -15,9 +15,7 @@ typedef struct {
     char vid_dir[1024];
 } ComposeCfg;
 
-/* resolve library dirs from env/config; dies on missing libs */
-void compose_resolve_dirs(ComposeCfg *cc);
-
+/* library dirs come from plan_prepare (env/config, die on missing keys) */
 int compose_run(ComposeCfg *cc);
 
 #endif
