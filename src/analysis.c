@@ -12,6 +12,11 @@
 
 static void cache_dir(char *buf, size_t n)
 {
+    const char *xdg = getenv("XDG_CACHE_HOME");
+    if (xdg && xdg[0]) {
+        snprintf(buf, n, "%s/tj", xdg);
+        return;
+    }
     const char *home = getenv("HOME");
     if (home) snprintf(buf, n, "%s/.cache/tj", home);
     else snprintf(buf, n, ".tj_cache");

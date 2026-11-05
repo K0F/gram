@@ -29,15 +29,16 @@ fragments.
 
 ## Commands
 
+    gram help [command]
     gram omicron [-n N] [--reverse R] [--limit K] [--force]
     gram analyze FILE...
-    gram render "<edl>" [out.wav] [--bpm auto|N] [--snap] [--keylock auto|K]
+    gram render "<edl>" [out.wav] [--out PATH] [--bpm auto|N] [--snap] [--keylock auto|K]
                 [--arc t:g,...] [--master pop|subtle]
     gram plan <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]
               [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]
     gram av "<edl>" out.mp4 [--vedl F] [--arc t:g,...] [--vid DIR]
             [--w W] [--h H] [--fps N]
-    gram edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]
+    gram edit [out.mp4] [-t TEXT|--text TEXT] [-f FILE] [--vid DIR] [--w W] [--h H] [--fps N]
               [--span S] [--max N] [--edl FILE] [--mute]
     gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]
               [--dur S] [--seed N] [--max N] [--mute]
@@ -45,20 +46,29 @@ fragments.
               [--stone FILE] [--dada-bin PATH]
     gram dada out.mp4 [--img DIR] [--fld DIR] [--title T] [--title-slots N]
               [--title-px P] [--stone FILE] [--dada-bin PATH] [--mute]
-    gram title out.mp4 -t 'LINE' [-t ...] [-s PX] [-d SECS] [--stone FILE]
+    gram title out.mp4 [-t 'LINE'...] [-f FILE] [-s PX] [-d SECS] [--stone FILE]
               [--w W] [--h H] [--fps N] [--mute]
     gram partition out.mp4 -p PATTERN | --script F [-i FILE ...] [--unit N]
               [--std] [--edl F] [--mlt F] [--w W] [--h H] [--fps N] [--mute]
     gram compose <style> [seed] [...same options as plan]
 
-All commands share one flag parser, so a fixed core set is accepted
-everywhere and ignored where it does not apply:
+All commands share a unified table-driven flag parser adhering to standard UNIX conventions:
 
     --w N --h N --fps N   output raster
     --max N               cap on files / images / expressions (omicron: = --limit)
     --mute                silent video output (no audio mux)
     --out PATH            output path or prefix (av/edit/slides/dada: the out.mp4)
     --seed N              RNG seed
+    --                    POSIX option delimiter (terminates options; subsequent args are positional)
+
+### UNIX Streams & Pipeline Composability
+
+Every command accepting text or structured scripts (`render`, `av`, `edit`, `title`, `partition`) adheres to strict UNIX stream semantics:
+- **Direct String:** Pass inline strings or EDL expressions directly as arguments.
+- **File Path:** Pass a path on disk (`.edl`, `.txt`, `.part`).
+- **Standard Input:** Pass `-` or simply pipe data via stdin.
+- **Dynamic Memory:** All input reading and EDL buffer handling is dynamically allocated without arbitrary static buffer ceilings (e.g. multi-movement EDLs).
+- **Targeted Help:** Run `gram help <command>` or `gram <command> --help` for dedicated subcommand syntax and options.
 
 Every value flag accepts both `--flag value` and `--flag=value`, including
 the render forms (`--bpm`, `--keylock`, `--master`). `av`/`edit` resolve the

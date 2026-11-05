@@ -37,6 +37,15 @@ float env_eval(const EnvPt *e, int n, float t);
 /* capture combined stdout+stderr of a shell command */
 int run_capture(const char *cmd, char *out, size_t outlen);
 
+/* read an entire stream (seekable or non-seekable/pipe) into heap string */
+char *read_stream_all(FILE *fp);
+
+/* read a file into heap string (handles "-" or pipes as stdin) */
+char *read_file_all(const char *path, size_t *len_out);
+
+/* return heap copy of string, or file content if src is an existing file or "-" */
+char *read_file_or_string(const char *src);
+
 /* walk a RIFF/WAVE file to its PCM data chunk (handles LIST/INFO chunks) */
 int wav_data_info(FILE *fp, uint32_t *rate, uint16_t *block_align,
                   long *data_pos, uint32_t *data_size);

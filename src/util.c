@@ -173,6 +173,63 @@ int run_capture(const char *cmd, char *out, size_t outlen)
     return rc == 0 ? 0 : -1;
 }
 
+char *read_stream_all(FILE *fp)
+{
+    if (!fp) return NULL;
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = xmalloc(cap);
+    for (;;) {
+        if (len + 4096 + 1 > cap) {
+            cap *= 2;
+            buf = xrealloc(buf, cap);
+        }
+        size_t r = fread(buf + len, 1, 4096, fp);
+        if (r == 0) break;
+        len += r;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+char *read_file_all(const char *path, size_t *len_out)
+{
+    if (!path || !path[0]) return NULL;
+    FILE *fp = NULL;
+    if (strcmp(path, "-") == 0) {
+        fp = stdin;
+    } else {
+        fp = fopen(path, "rb");
+        if (!fp) return NULL;
+    }
+    char *buf = read_stream_all(fp);
+    if (fp != stdin) fclose(fp);
+    if (buf && len_out) *len_out = strlen(buf);
+    return buf;
+}
+
+char *read_file_or_string(const char *src)
+{
+    if (!src) return NULL;
+    if (strcmp(src, "-") == 0) {
+        return read_stream_all(stdin);
+    }
+    /* check if src points to an accessible regular file */
+    struct stat st;
+    if (stat(src, &st) == 0 && S_ISREG(st.st_mode)) {
+        FILE *fp = fopen(src, "r");
+        if (fp) {
+            char *buf = read_stream_all(fp);
+            fclose(fp);
+            if (buf) {
+                trim_ws(buf);
+                return buf;
+            }
+        }
+    }
+    return xstrdup(src);
+}
+
 int wav_data_info(FILE *fp, uint32_t *rate, uint16_t *block_align,
                   long *data_pos, uint32_t *data_size)
 {

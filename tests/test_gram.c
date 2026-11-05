@@ -57,6 +57,14 @@ static void test_fnv(void)
     CHECK(fnv1a("") == 14695981039346656037UL);
 }
 
+static void eval_expr(const OmicronExpr *e, double *out)
+{
+    double acc = 1.0;
+    for (int i = 0; i < e->n_ops; i++)
+        acc = omicron_apply_op(e->op[i], acc, (double)(i + 2));
+    *out = acc;
+}
+
 static void test_omicron(void)
 {
     /* enumeration over a..c : 2 gaps x 4 ops = 16 expressions */
@@ -80,6 +88,9 @@ static void test_omicron(void)
     e.op[1] = 0; /* plus */
     e.value = omicron_apply_op(0, omicron_apply_op(1, 1.0, 2.0), 3.0);
     CHECK(fabs(e.value - 2.0) < 1e-12);
+    double val = 0.0;
+    eval_expr(&e, &val);
+    CHECK(fabs(val - 2.0) < 1e-12);
     char line[256];
     omicron_format(&e, line, sizeof(line));
     CHECK(strstr(line, "a") != NULL && strstr(line, "= 2") != NULL);
@@ -89,14 +100,6 @@ static void test_omicron(void)
     long long got = omicron_collect(6, 1, 42.0, 8, 8, hit);
     CHECK(got > 0);
     if (got > 0) CHECK(fabs(hit[0].value - 42.0) < 1e-9);
-}
-
-static void eval_expr(const OmicronExpr *e, double *out)
-{
-    double acc = 1.0;
-    for (int i = 0; i < e->n_ops; i++)
-        acc = omicron_apply_op(e->op[i], acc, (double)(i + 2));
-    *out = acc;
 }
 
 static void test_camelot(void)
@@ -369,6 +372,50 @@ static void test_title_fit(void)
     CHECK(s >= 24 && s <= 160);
 }
 
+static void test_flags_dashdash_and_long(void)
+{
+    long long limit = 0;
+    FlagSpec tbl[] = {
+        { "--limit", FLAG_LONG, &limit, NULL, 0 },
+    };
+    CoreFlags core;
+    core_flags_defaults(&core);
+    char **pos = NULL;
+    int npos = 0;
+
+    char *argv[] = { "gram", "test", "--limit", "42000000000", "--", "-not-a-flag", "file.edl" };
+    int r = flags_parse(7, argv, 2, tbl, 1, NULL, &core, &pos, &npos);
+    CHECK(r == 0);
+    CHECK(limit == 42000000000LL);
+    CHECK(npos == 2);
+    CHECK(strcmp(pos[0], "-not-a-flag") == 0);
+    CHECK(strcmp(pos[1], "file.edl") == 0);
+    free(pos);
+}
+
+static void test_stream_and_file_io(void)
+{
+    /* test read_file_or_string with inline text */
+    char *s = read_file_or_string("in0 out5 at0 test.wav");
+    CHECK(s != NULL);
+    CHECK(strcmp(s, "in0 out5 at0 test.wav") == 0);
+    free(s);
+
+    /* test read_file_or_string with temporary file */
+    const char *tmp = "/tmp/gram_test_edl.tmp";
+    FILE *fp = fopen(tmp, "w");
+    CHECK(fp != NULL);
+    if (fp) {
+        fprintf(fp, "in10 out20 at5 /path/to/track.wav\n");
+        fclose(fp);
+    }
+    char *fcontent = read_file_or_string(tmp);
+    CHECK(fcontent != NULL);
+    CHECK(strstr(fcontent, "in10 out20 at5") != NULL);
+    free(fcontent);
+    remove(tmp);
+}
+
 int main(void)
 {
     test_rng_determinism();
@@ -383,6 +430,8 @@ int main(void)
     test_partition_lex();
     test_partition_interp();
     test_title_fit();
+    test_flags_dashdash_and_long();
+    test_stream_and_file_io();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

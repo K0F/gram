@@ -55,6 +55,17 @@ int flags_parse(int argc, char **argv, int start,
             pos[n++] = (char *)arg;
             continue;
         }
+        if (strcmp(arg, "--") == 0) {
+            /* end of options: treat all remaining arguments as positional */
+            for (int j = i + 1; j < argc; j++) {
+                if (n == cap) {
+                    cap = cap ? cap * 2 : 8;
+                    pos = xrealloc(pos, (size_t)cap * sizeof(char *));
+                }
+                pos[n++] = argv[j];
+            }
+            break;
+        }
         if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
             free(pos);
             return -2;
@@ -79,6 +90,12 @@ int flags_parse(int argc, char **argv, int start,
                 const char *v;
                 if (take_value(argc, argv, &i, f->name, val, &v)) goto fail;
                 *(int *)f->out = atoi(v);
+                continue;
+            }
+            if (f->type == FLAG_LONG) {
+                const char *v;
+                if (take_value(argc, argv, &i, f->name, val, &v)) goto fail;
+                *(long long *)f->out = atoll(v);
                 continue;
             }
             if (f->type == FLAG_FLOAT) {

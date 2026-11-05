@@ -145,22 +145,6 @@ static void scan_video_pool(const char *dir, char ***paths, double **durs,
     }
 }
 
-static char *read_stdin_all(void)
-{
-    size_t cap = 65536, len = 0;
-    char *buf = xmalloc(cap);
-    for (;;) {
-        if (len + 4096 + 1 > cap) {
-            cap *= 2;
-            buf = xrealloc(buf, cap);
-        }
-        size_t got = fread(buf + len, 1, 4096, stdin);
-        len += got;
-        if (got == 0) break;
-    }
-    buf[len] = 0;
-    return buf;
-}
 
 /* ------------------------------------------------------------------ */
 /* original-audio mixdown                                              */
@@ -366,9 +350,9 @@ static void edit_build_mix(const EditCut *cuts, long ncuts,
 }
 
 
-int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
-             int w, int h, int fps, int max_files, const char *edl_dump,
-             int mute)
+int edit_run_text(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
+                  int w, int h, int fps, int max_files, const char *edl_dump,
+                  int mute, const char *input_text)
 {
     if (!out_mp4 || !out_mp4[0]) die("edit: output .mp4 path required");
     if (!vid_dir || !vid_dir[0]) die("edit: no video dir (use --vid)");
@@ -381,7 +365,8 @@ int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
     if (n == 0) die("edit: no video sources found in %s", vid_dir);
     printf("edit: pool of %d clip(s)\n", n);
 
-    char *text = read_stdin_all();
+    char *text = input_text ? xstrdup(input_text) : read_stream_all(stdin);
+    if (!text) die("edit: failed to read input text");
 
     /* pre-count letters so the cut table can live on the heap: texts are
      * unbounded and one letter always yields exactly one cut */
@@ -448,4 +433,11 @@ int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
     free(edl.buf);
     free(vedl.buf);
     return rc;
+}
+
+int edit_run(const char *vid_dir, const EditCfg *cfg, const char *out_mp4,
+             int w, int h, int fps, int max_files, const char *edl_dump,
+             int mute)
+{
+    return edit_run_text(vid_dir, cfg, out_mp4, w, h, fps, max_files, edl_dump, mute, NULL);
 }

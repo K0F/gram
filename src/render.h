@@ -1,6 +1,8 @@
 #ifndef GRAM_RENDER_H
 #define GRAM_RENDER_H
 
+#include "flags.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -51,6 +53,9 @@ typedef struct {
 } RenderOpts;
 
 void render_opts_defaults(RenderOpts *o);
+
+extern const FlagSpec RENDER_FLAGS[];
+extern const int N_RENDER_FLAGS;
 
 /* parse option tokens (argv[start..argc-1]) into o; accepts the same
  * spellings as the original tj CLI; returns 0 on success */

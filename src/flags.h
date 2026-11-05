@@ -20,6 +20,7 @@
 typedef enum {
     FLAG_BOOL,   /* out: int* set to 1 */
     FLAG_INT,    /* out: int* */
+    FLAG_LONG,   /* out: long long* */
     FLAG_FLOAT,  /* out: double* */
     FLAG_STR,    /* out: const char** */
     FLAG_CALL,   /* cb(ctx, name, val); val NULL means the flag was bare */

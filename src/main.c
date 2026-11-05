@@ -35,57 +35,139 @@ static void usage(const char *prog)
         "  --seed N              RNG seed\n"
         "  every value flag accepts both '--flag value' and '--flag=value'\n"
         "\n"
+        "commands:\n"
         "  omicron [-n N] [--reverse R] [--limit K] [--force]\n"
         "      enumerate operator expressions over letters a..z = 1..26\n"
         "  analyze <file>...\n"
         "      BPM / Camelot key / rhythmic texture (cached in ~/.cache/tj)\n"
         "  render \"<edl>\" [out.wav] [--bpm auto|N] [--snap] [--keylock auto|K]\n"
         "          [--fade-in S] [--fade-out S] [--arc t:g,...] [--master pop|subtle]\n"
-        "      mix an EDL to a 48k stereo WAV (tj-compatible)\n"
+        "      mix an EDL to a 48k stereo WAV (supports string, file.edl, or stdin -)\n"
         "  plan <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "       [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      plan movements, write .edl (+.vedl) sidecars only\n"
         "  av \"<edl>\" out.mp4 [--vedl F] [--arc t:g,...] [--vid DIR]\n"
         "     [--w W] [--h H] [--fps N]\n"
-        "      render the visual edit of an EDL, muxed with <out>_audio.wav;\n"
-        "      --vid falls back to $GRAM_VID, conf vid=, else an error\n"
-        "  edit out.mp4 [--vid DIR] [--w W] [--h H] [--fps N]\n"
+        "      render the visual edit of an EDL, muxed with <out>_audio.wav\n"
+        "  edit out.mp4 [-t 'TEXT' | -f FILE] [--vid DIR] [--w W] [--h H] [--fps N]\n"
         "       [--span S] [--max N] [--edl FILE] [--mute]\n"
-        "      text-driven video edit: stdin letters a..z pick clips\n"
-        "      ((v-1) mod pool, path-sorted), their position in the text sets\n"
-        "      the in-point (golden-ratio scatter); 0.432s slices, continuous,\n"
-        "      muxed with the clips' original audio (--mute for silent)\n"
+        "      text-driven video edit: letters a..z pick clips from pool;\n"
+        "      reads text from stdin, -t 'TEXT', or -f FILE\n"
         "  slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]\n"
         "       [--dur S] [--seed N] [--max N] [--mute]\n"
         "       [--dada] [--title T] [--title-slots N] [--title-px P]\n"
         "       [--stone FILE] [--dada-bin PATH]\n"
         "      picture slideshow: crop/fill to format, grayscale, shuffled,\n"
-        "      muxed with field recordings; 0.432s per slide by default.\n"
-        "      --dada: deterministic stone-oracle film, exact 60s\n"
+        "      muxed with field recordings; 0.432s per slide by default\n"
         "  dada out.mp4 [--img DIR] [--fld DIR] [--title T] [--title-slots N]\n"
         "       [--title-px P] [--stone FILE] [--dada-bin PATH] [--mute]\n"
         "      the committed dada film (60s, 932x576@25, 0.216s slides, kof26\n"
         "      title over the noise stone, B&W Camera pictures, dense field mix)\n"
-        "      — byte-for-byte reproducible from the same inputs\n"
         "  compose <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
         "          [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n"
         "      full pipeline: libraries -> plan -> render -> master -> mp4\n"
-        "  title out.mp4 -t 'LINE' [-t ...] [-s PX] [-d SECS] [--stone FILE]\n"
+        "  title out.mp4 -t 'LINE' [-t ...] [-f FILE] [-s PX] [-d SECS] [--stone FILE]\n"
         "       [--w W] [--h H] [--fps N] [--mute]\n"
-        "      Gomotor title card: white text on black (or a greyscale --stone),\n"
-        "      auto-fitted (or fixed -s px), muxed with a silent AAC bed\n"
-        "      (video-only with --mute)\n"
+        "      Gomotor title card: white text on black (or a greyscale --stone)\n"
         "  partition out.mp4 -p PATTERN | --script F [-i FILE ...] [--unit N]\n"
         "       [--std] [--edl F] [--mlt F] [--w W] [--h H] [--fps N] [--mute]\n"
-        "      transport-DSL crosscut (open/jf/jb/pf/x/H) rendered silently\n"
-        "      through the gram av engine; add --edl F / --mlt F to dump\n"
-        "      mpv EDL v2 / MLT XML sidecars; --std normalizes sources\n"
+        "      transport-DSL crosscut (open/jf/jb/pf/x/H) rendered silently;\n"
+        "      supports script from file or stdin (--script -)\n"
         "\n"
         "styles: day | storm | drift | pulse | rupture | strata\n"
         "config: central ~/.config/gram.conf (mus= fld= vid= img=; michacka reads\n"
         "mus= fld= tj= from it too); path override env GRAM_CONF; per-key env\n"
-        "GRAM_MUS / GRAM_FLD / GRAM_VID / GRAM_IMG; missing keys are errors.\n",
+        "GRAM_MUS / GRAM_FLD / GRAM_VID / GRAM_IMG; missing keys are errors.\n"
+        "help: 'gram help <command>' or 'gram <command> --help' for details.\n",
         prog);
+}
+
+static void help_cmd(const char *cmd)
+{
+    if (!cmd || !cmd[0]) {
+        usage("gram");
+        return;
+    }
+    if (strcmp(cmd, "omicron") == 0) {
+        fprintf(stderr,
+            "usage: gram omicron [-n N] [--reverse R] [--limit K] [--force]\n\n"
+            "Enumerate operator expressions over letters a..z = 1..26 with + − × ÷.\n\n"
+            "Options:\n"
+            "  -n N           letter count (1..26, default 26)\n"
+            "  --reverse R    search for expressions evaluating to target number R\n"
+            "  --limit K      maximum expressions to output (default 1000)\n"
+            "  --max K        alias for --limit\n"
+            "  --force        force enumeration even if combination count > 1M\n");
+    } else if (strcmp(cmd, "analyze") == 0) {
+        fprintf(stderr,
+            "usage: gram analyze <file>...\n\n"
+            "Analyze audio files for BPM, Camelot harmonic key, and texture metrics.\n"
+            "Results are cached in $XDG_CACHE_HOME/tj or ~/.cache/tj.\n");
+    } else if (strcmp(cmd, "render") == 0) {
+        fprintf(stderr,
+            "usage: gram render \"<edl>\" [out.wav] [opts]\n"
+            "       gram render file.edl [out.wav] [opts]\n"
+            "       cat file.edl | gram render - [out.wav] [opts]\n\n"
+            "Offline EDL mixdown engine (tj-compatible) rendered into 48k stereo WAV.\n\n"
+            "Options:\n"
+            "  --out PATH            output WAV file path (alternative to positional out.wav)\n"
+            "  --bpm auto|N          tempo matching (auto = median BPM, or fixed BPM)\n"
+            "  --snap                snap in/out/at points to the tempo beat grid\n"
+            "  --keylock auto|KEY    Camelot key harmonization (auto or specific key e.g. 8A)\n"
+            "  --fade-in S           default fade-in duration in seconds (default 0.1)\n"
+            "  --fade-out S          default fade-out duration in seconds (default 0.1)\n"
+            "  --arc t:g,...         gain automation arc curve (e.g. 0:0.5,10:1.0,20:0.2)\n"
+            "  --master pop|subtle   apply mastering chain with brickwall limiting\n");
+    } else if (strcmp(cmd, "plan") == 0) {
+        fprintf(stderr,
+            "usage: gram plan <style> [seed] [--parts N] [--len S] [--out PREFIX] [--dry-run]\n"
+            "                 [--engine rng|omicron] [--letters N] [--target R] [--max N] [--av]\n\n"
+            "Plan multi-movement stochastic/combinatorial compositions (.edl + .arc sidecars).\n\n"
+            "Styles: day | storm | drift | pulse | rupture | strata\n"
+            "Engines: rng (bit-exact michacka PRNG) | omicron (deterministic enumeration)\n");
+    } else if (strcmp(cmd, "compose") == 0) {
+        fprintf(stderr,
+            "usage: gram compose <style> [seed] [...same options as plan]\n\n"
+            "Full pipeline: library scan -> plan -> audio render -> master -> video render (with --av).\n");
+    } else if (strcmp(cmd, "av") == 0) {
+        fprintf(stderr,
+            "usage: gram av \"<edl>\" out.mp4 [--vedl F] [--arc S] [--vid DIR]\n"
+            "               [--w W] [--h H] [--fps N] [--mute]\n\n"
+            "Render visual edit corresponding to an EDL, muxed with audio.\n"
+            "Supports file path or stdin (-) for EDL and VEDL.\n");
+    } else if (strcmp(cmd, "edit") == 0) {
+        fprintf(stderr,
+            "usage: gram edit out.mp4 [-t 'TEXT' | -f FILE] [--vid DIR] [--w W] [--h H]\n"
+            "                 [--fps N] [--span S] [--max N] [--edl FILE] [--mute]\n\n"
+            "Text-driven deterministic video edit. Reads text from stdin, -t 'TEXT', or -f FILE.\n"
+            "Letters a..z pick clips from pool; position sets in-point via golden ratio scatter.\n");
+    } else if (strcmp(cmd, "slides") == 0) {
+        fprintf(stderr,
+            "usage: gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] [--fps N]\n"
+            "                   [--dur S] [--seed N] [--max N] [--mute]\n"
+            "                   [--dada] [--title T] [--title-slots N] [--title-px P]\n"
+            "                   [--stone FILE] [--dada-bin PATH]\n\n"
+            "Grayscale photo slideshow from images in DIR, crop/filled and muxed with field recordings.\n");
+    } else if (strcmp(cmd, "dada") == 0) {
+        fprintf(stderr,
+            "usage: gram dada out.mp4 [--img DIR] [--fld DIR] [--title T] [--title-slots N]\n"
+            "                 [--title-px P] [--stone FILE] [--dada-bin PATH] [--mute]\n\n"
+            "Committed, deterministic 60s stone-oracle film (932x576@25, noise stone oracle).\n");
+    } else if (strcmp(cmd, "title") == 0) {
+        fprintf(stderr,
+            "usage: gram title out.mp4 -t 'LINE' [-t ...] [-f FILE] [-s PX] [-d SECS]\n"
+            "                  [--stone FILE] [--w W] [--h H] [--fps N] [--mute]\n\n"
+            "Gomotor stroke font intertitle cards over black or stone texture.\n"
+            "Accepts lines from -t, -f FILE, or standard input.\n");
+    } else if (strcmp(cmd, "partition") == 0) {
+        fprintf(stderr,
+            "usage: gram partition out.mp4 -p PATTERN | --script F [-i FILE ...] [--unit N]\n"
+            "                      [--std] [--edl F] [--mlt F] [--w W] [--h H] [--fps N] [--mute]\n\n"
+            "Transport DSL crosscut language (open/jf/jb/pf/x/H) across video sources.\n"
+            "Supports script from file or stdin (--script -).\n");
+    } else {
+        usage("gram");
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -210,7 +292,7 @@ static int cmd_omicron(int argc, char **argv)
     FlagSpec tbl[] = {
         { "-n",         FLAG_INT,  &a.n,      NULL,      0 },
         { "--reverse",  FLAG_CALL, NULL,      h_reverse, 0 },
-        { "--limit",    FLAG_INT,  &a.limit,  NULL,      0 },
+        { "--limit",    FLAG_LONG, &a.limit,  NULL,      0 },
         { "--force",    FLAG_BOOL, &a.force,  NULL,      0 },
     };
     CoreFlags core;
@@ -219,10 +301,10 @@ static int cmd_omicron(int argc, char **argv)
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 4, &a, &core, &pos, &npos);
     free_pos(pos);
-    if (r == -2) { usage(argv[0]); return 0; }
+    if (r == -2) { help_cmd("omicron"); return 0; }
     if (r < 0) return 1;
     if (npos > 0) {
-        fprintf(stderr, "usage: gram omicron [-n N] [--reverse R] [--limit K] [--force]\n");
+        help_cmd("omicron");
         return 1;
     }
     if (a.n < 1 || a.n > OMICRON_MAX_LETTERS) {
@@ -246,15 +328,16 @@ static int cmd_omicron(int argc, char **argv)
     long long count = 0;
     OmicronExpr *buf = xmalloc(sizeof(OmicronExpr) * 4096);
     for (;;) {
-        long long want = a.has_target ? (a.limit - count < 4096 ? a.limit - count : 4096) : 4096;
+        long long rem = a.limit > count ? a.limit - count : 0;
+        long long want = rem < 4096 ? rem : 4096;
         if (want <= 0) break;
         long long got = omicron_collect(a.n, a.has_target, a.target, want, want, buf);
-        for (long long i = 0; i < got; i++) {
+        for (long long i = 0; i < got && count < a.limit; i++) {
             char line[512];
             omicron_format(&buf[i], line, sizeof(line));
             printf("%s\n", line);
+            count++;
         }
-        count += got;
         if (got < want || count >= a.limit) break;
         if (!a.has_target && count >= (long long)combos) break;
     }
@@ -271,10 +354,10 @@ static int cmd_analyze(int argc, char **argv)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, NULL, 0, NULL, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd("analyze"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
     if (npos < 1) {
-        fprintf(stderr, "Usage: gram analyze <file>...\n");
+        help_cmd("analyze");
         free_pos(pos);
         return 1;
     }
@@ -291,6 +374,46 @@ static int cmd_analyze(int argc, char **argv)
     }
     free_pos(pos);
     return 0;
+}
+
+static int cmd_render(int argc, char **argv)
+{
+    RenderOpts o;
+    render_opts_defaults(&o);
+    CoreFlags core;
+    core_flags_defaults(&core);
+    char **pos = NULL;
+    int npos = 0;
+
+    int r = flags_parse(argc, argv, 2,
+                        RENDER_FLAGS, N_RENDER_FLAGS,
+                        &o, &core, &pos, &npos);
+    if (r == -2) { help_cmd("render"); free_pos(pos); return 0; }
+    if (r < 0) { free_pos(pos); return 1; }
+
+    const char *edl_arg = npos > 0 ? pos[0] : NULL;
+    const char *out_file = core.out ? core.out : (npos > 1 ? pos[1] : NULL);
+
+    char *edl_content = NULL;
+    if (edl_arg && strcmp(edl_arg, "-") != 0) {
+        edl_content = read_file_or_string(edl_arg);
+    } else {
+        if (edl_arg || !isatty(STDIN_FILENO)) {
+            edl_content = read_stream_all(stdin);
+        }
+    }
+
+    if (!edl_content || !edl_content[0]) {
+        help_cmd("render");
+        free(edl_content);
+        free_pos(pos);
+        return 1;
+    }
+
+    int rc = render_edl(edl_content, out_file, &o);
+    free(edl_content);
+    free_pos(pos);
+    return rc;
 }
 
 static void write_simple(const char *path, const char *content)
@@ -365,7 +488,7 @@ static int cmd_plan_or_compose(int argc, char **argv, int do_compose)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 7, &cc, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd(do_compose ? "compose" : "plan"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     if (npos >= 1) {
@@ -437,7 +560,7 @@ static int cmd_av(int argc, char **argv)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 3, NULL, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd("av"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
@@ -445,11 +568,21 @@ static int cmd_av(int argc, char **argv)
     const char *out = core.out ? core.out : (npos > 1 ? pos[1] : NULL);
     free_pos(pos);
 
+    if (!edl && !isatty(STDIN_FILENO)) edl = "-";
+
     if (!edl || !out) {
-        fprintf(stderr, "usage: gram av \"<edl>\" out.mp4 [--vedl F] [--arc S] "
-                        "[--vid DIR] [--w W] [--h H] [--fps N]\n");
+        help_cmd("av");
         return 1;
     }
+
+    char *edl_content = read_file_or_string(edl);
+    if (!edl_content || !edl_content[0]) {
+        fprintf(stderr, "gram av: empty EDL input\n");
+        free(edl_content);
+        return 1;
+    }
+
+    char *vedl_content = vedl ? read_file_or_string(vedl) : NULL;
 
     /* video pool resolution: --vid > $GRAM_VID > conf vid= > default */
     if (!vid) vid = resolve_vid();
@@ -465,12 +598,16 @@ static int cmd_av(int argc, char **argv)
     if (access(audio_wav, F_OK) != 0)
         die("audio mix '%s' not found — render it first with 'gram render', or use compose --av",
             audio_wav);
-    return av_render(edl, vedl, arc, audio_wav, vid, out, &o);
+    int rc = av_render(edl_content, vedl_content, arc, audio_wav, vid, out, &o);
+    free(edl_content);
+    free(vedl_content);
+    return rc;
 }
 
 static int cmd_edit(int argc, char **argv)
 {
     const char *vid = NULL, *edl_dump = NULL;
+    const char *text_arg = NULL, *file_arg = NULL;
     int max_files = 1000;
     AvOpts o;
     av_opts_defaults(&o);
@@ -481,29 +618,41 @@ static int cmd_edit(int argc, char **argv)
         { "--vid",  FLAG_STR,   &vid,      NULL, 0 },
         { "--edl",  FLAG_STR,   &edl_dump, NULL, 0 },
         { "--span", FLAG_FLOAT, &ec.span,  NULL, 0 },
+        { "-t",     FLAG_STR,   &text_arg, NULL, 0 },
+        { "--text", FLAG_STR,   &text_arg, NULL, 0 },
+        { "-f",     FLAG_STR,   &file_arg, NULL, 0 },
     };
     CoreFlags core;
     core_flags_defaults(&core);
     char **pos = NULL;
     int npos = 0;
-    int r = flags_parse(argc, argv, 2, tbl, 3, NULL, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    int r = flags_parse(argc, argv, 2, tbl, 6, NULL, &core, &pos, &npos);
+    if (r == -2) { help_cmd("edit"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
     if (core.max > 0) max_files = (int)core.max;
     const char *out = core.out ? core.out : (npos > 0 ? pos[0] : NULL);
+    if (!text_arg && npos > 1) text_arg = pos[1];
     free_pos(pos);
 
     if (!out) {
-        fprintf(stderr, "usage: gram edit out.mp4 [--vid DIR] [--w W] [--h H] "
-                        "[--fps N] [--span S] [--max N] [--edl FILE] [--mute] < text\n");
+        help_cmd("edit");
         return 1;
+    }
+
+    char *text_content = NULL;
+    if (file_arg) {
+        text_content = read_file_or_string(file_arg);
+    } else if (text_arg) {
+        text_content = xstrdup(text_arg);
     }
 
     /* resolution order: --vid > $GRAM_VID > conf vid= > default pool */
     if (!vid) vid = resolve_vid();
-    return edit_run(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump, core.mute);
+    int rc = edit_run_text(vid, &ec, out, o.w, o.h, o.fps, max_files, edl_dump, core.mute, text_content);
+    free(text_content);
+    return rc;
 }
 
 static int cmd_slides(int argc, char **argv)
@@ -531,7 +680,7 @@ static int cmd_slides(int argc, char **argv)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 9, NULL, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd("slides"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
@@ -542,14 +691,7 @@ static int cmd_slides(int argc, char **argv)
     free_pos(pos);
 
     if (!out || !img) {
-        fprintf(stderr, "usage: gram slides out.mp4 --img DIR [--fld DIR] [--w W] [--h H] "
-                        "[--fps N] [--dur S] [--seed N] [--max N] [--mute]\n"
-                        "  --dada           deterministic stone-oracle film (60s)\n"
-                        "  --title T        opening title text (drawn over the stone)\n"
-                        "  --title-slots N  title card length in slides (default 6)\n"
-                        "  --title-px P     title cap height (default 12)\n"
-                        "  --stone FILE     stone image (default dada/noise.png)\n"
-                        "  --dada-bin PATH  dada binary (default exe/dada/dada)\n");
+        help_cmd("slides");
         return 1;
     }
 
@@ -563,10 +705,6 @@ static int cmd_slides(int argc, char **argv)
                       core.mute, &so);
 }
 
-/* `gram dada` — the committed film: exact 60s, 932x576@25, 0.216s slides,
- * kof26 opening title over the noise stone, pictures from the B&W film
- * scans in the central config's img= dir, dense field mix from fld=.
- * Reproduces byte-for-byte from the same inputs. */
 static int cmd_dada(int argc, char **argv)
 {
     const char *img = NULL, *fld = NULL;
@@ -594,7 +732,7 @@ static int cmd_dada(int argc, char **argv)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 7, NULL, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd("dada"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
@@ -603,9 +741,7 @@ static int cmd_dada(int argc, char **argv)
     free_pos(pos);
 
     if (!out) {
-        fprintf(stderr, "usage: gram dada out.mp4 [--img DIR] [--fld DIR] [--title T] "
-                        "[--title-slots N] [--title-px P] [--stone FILE] "
-                        "[--dada-bin PATH] [--mute]\n");
+        help_cmd("dada");
         return 1;
     }
 
@@ -634,24 +770,25 @@ static int h_title_line(void *ctx, const char *name, const char *val)
 static int cmd_title(int argc, char **argv)
 {
     TitleArgs ta = { { 0 }, 0 };
-    const char *stone = NULL;
+    const char *stone = NULL, *file_arg = NULL;
     double dur = 0.0;
     int size_px = 0;
     AvOpts o;
     av_opts_defaults(&o);
 
     FlagSpec tbl[] = {
-        { "-t",      FLAG_CALL,  NULL,     h_title_line, 0 },
-        { "--stone", FLAG_STR,   &stone,   NULL,         0 },
-        { "-d",      FLAG_FLOAT, &dur,     NULL,         0 },
-        { "-s",      FLAG_INT,   &size_px, NULL,         0 },
+        { "-t",      FLAG_CALL,  NULL,      h_title_line, 0 },
+        { "--stone", FLAG_STR,   &stone,    NULL,         0 },
+        { "-d",      FLAG_FLOAT, &dur,      NULL,         0 },
+        { "-s",      FLAG_INT,   &size_px,  NULL,         0 },
+        { "-f",      FLAG_STR,   &file_arg, NULL,         0 },
     };
     CoreFlags core;
     core_flags_defaults(&core);
     char **pos = NULL;
     int npos = 0;
-    int r = flags_parse(argc, argv, 2, tbl, 4, &ta, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    int r = flags_parse(argc, argv, 2, tbl, 5, &ta, &core, &pos, &npos);
+    if (r == -2) { help_cmd("title"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
@@ -659,16 +796,41 @@ static int cmd_title(int argc, char **argv)
     free_pos(pos);
 
     if (!out) {
-        fprintf(stderr, "usage: gram title out.mp4 -t 'LINE' [-t ...] [-s PX] "
-                        "[-d SECS] [--stone FILE] [--w W] [--h H] [--fps N] [--mute]\n");
+        help_cmd("title");
         return 1;
     }
+
+    char *allocated_lines[64] = { 0 };
+    int n_allocated = 0;
+
     if (ta.n == 0) {
-        fprintf(stderr, "gram title: at least one -t 'LINE' required\n");
+        char *src_text = NULL;
+        if (file_arg) {
+            src_text = read_file_or_string(file_arg);
+        } else if (!isatty(STDIN_FILENO)) {
+            src_text = read_stream_all(stdin);
+        }
+        if (src_text) {
+            char *save = NULL;
+            for (char *line = strtok_r(src_text, "\r\n", &save); line && ta.n < 64; line = strtok_r(NULL, "\r\n", &save)) {
+                trim_ws(line);
+                if (line[0]) {
+                    allocated_lines[n_allocated] = xstrdup(line);
+                    ta.lines[ta.n++] = allocated_lines[n_allocated++];
+                }
+            }
+            free(src_text);
+        }
+    }
+
+    if (ta.n == 0) {
+        fprintf(stderr, "gram title: at least one line required (via -t, -f, or stdin)\n");
         return 1;
     }
-    return title_run(ta.lines, ta.n, stone, out, o.w, o.h, o.fps, dur, size_px,
-                     core.mute);
+    int rc = title_run(ta.lines, ta.n, stone, out, o.w, o.h, o.fps, dur, size_px,
+                      core.mute);
+    for (int i = 0; i < n_allocated; i++) free(allocated_lines[i]);
+    return rc;
 }
 
 typedef struct {
@@ -708,16 +870,19 @@ static int cmd_partition(int argc, char **argv)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, 2, tbl, 7, &pa, &core, &pos, &npos);
-    if (r == -2) { usage(argv[0]); free_pos(pos); return 0; }
+    if (r == -2) { help_cmd("partition"); free_pos(pos); return 0; }
     if (r < 0) { free_pos(pos); return 1; }
 
     avopts_from_core(&o, &core);
     const char *out = core.out ? core.out : (npos > 0 ? pos[0] : NULL);
     free_pos(pos);
 
+    if (!pattern && !script && !isatty(STDIN_FILENO)) {
+        script = "-";
+    }
+
     if (!pattern && !script) {
-        fprintf(stderr, "usage: gram partition out.mp4 -p PATTERN | --script F "
-                        "[-i FILE ...] [--unit N] [--std] [--edl F] [--mlt F]\n");
+        help_cmd("partition");
         return 1;
     }
     if (pa.n == 0 && !script) {
@@ -752,19 +917,13 @@ int main(int argc, char **argv)
         usage(argv[0]);
         return argc < 2 ? 1 : 0;
     }
+    if (strcmp(argv[1], "help") == 0) {
+        help_cmd(argc > 2 ? argv[2] : NULL);
+        return 0;
+    }
     if (strcmp(argv[1], "omicron") == 0) return cmd_omicron(argc, argv);
     if (strcmp(argv[1], "analyze") == 0) return cmd_analyze(argc, argv);
-    if (strcmp(argv[1], "render") == 0) {
-        if (argc < 3) { fprintf(stderr, "Usage: gram render \"<edl>\" [out.wav] [opts]\n"); return 1; }
-        const char *edl = argv[2];
-        const char *out = NULL;
-        int opt_start = 3;
-        if (argc > 3 && argv[3][0] != '-') { out = argv[3]; opt_start = 4; }
-        RenderOpts o;
-        render_opts_defaults(&o);
-        if (render_opts_parse(argc, argv, opt_start, &o)) return 1;
-        return render_edl(edl, out, &o);
-    }
+    if (strcmp(argv[1], "render") == 0) return cmd_render(argc, argv);
     if (strcmp(argv[1], "plan") == 0) return cmd_plan_or_compose(argc, argv, 0);
     if (strcmp(argv[1], "compose") == 0) return cmd_plan_or_compose(argc, argv, 1);
     if (strcmp(argv[1], "av") == 0) return cmd_av(argc, argv);

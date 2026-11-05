@@ -235,18 +235,7 @@ static char *strip_path(const char *s)
 
 static char *read_whole_file(const char *path, size_t *len_out)
 {
-    FILE *fp = fopen(path, "r");
-    if (!fp) return NULL;
-    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return NULL; }
-    long sz = ftell(fp);
-    if (sz < 0) { fclose(fp); return NULL; }
-    rewind(fp);
-    char *buf = xmalloc((size_t)sz + 1);
-    size_t got = fread(buf, 1, (size_t)sz, fp);
-    fclose(fp);
-    buf[got] = 0;
-    if (len_out) *len_out = got;
-    return buf;
+    return read_file_all(path, len_out);
 }
 
 static char *script_first_word(const char *line)

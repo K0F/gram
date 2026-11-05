@@ -474,7 +474,7 @@ static int h_master(void *ctx, const char *name, const char *val)
     return 0;
 }
 
-static const FlagSpec RENDER_FLAGS[] = {
+const FlagSpec RENDER_FLAGS[] = {
     { "--bpm",      FLAG_CALL, NULL, h_bpm,      1 },
     { "--snap",     FLAG_CALL, NULL, h_snap,     1 },
     { "--keylock",  FLAG_CALL, NULL, h_keylock,  1 },
@@ -483,6 +483,7 @@ static const FlagSpec RENDER_FLAGS[] = {
     { "--arc",      FLAG_CALL, NULL, h_arc,      0 },
     { "--master",   FLAG_CALL, NULL, h_master,   1 },
 };
+const int N_RENDER_FLAGS = (int)(sizeof(RENDER_FLAGS) / sizeof(RENDER_FLAGS[0]));
 
 int render_opts_parse(int argc, char **argv, int start, RenderOpts *o)
 {
@@ -491,7 +492,7 @@ int render_opts_parse(int argc, char **argv, int start, RenderOpts *o)
     char **pos = NULL;
     int npos = 0;
     int r = flags_parse(argc, argv, start,
-                        RENDER_FLAGS, (int)(sizeof(RENDER_FLAGS) / sizeof(RENDER_FLAGS[0])),
+                        RENDER_FLAGS, N_RENDER_FLAGS,
                         o, &core, &pos, &npos);
     free(pos);
     return r < 0 ? -1 : 0;
@@ -505,9 +506,7 @@ int render_edl(const char *edl_src, const char *out_file, const RenderOpts *opts
         opts = &defaults;
     }
 
-    char edl_str[2048];
-    strncpy(edl_str, edl_src, sizeof(edl_str));
-    edl_str[sizeof(edl_str) - 1] = '\0';
+    char *edl_str = xstrdup(edl_src);
 
     int auto_name = (out_file == NULL);
 
@@ -533,6 +532,10 @@ int render_edl(const char *edl_src, const char *out_file, const RenderOpts *opts
         track_count++;
         token = strtok(NULL, ",");
     }
+    if (token != NULL) {
+        fprintf(stderr, "gram render: warning: exceeded MAX_TRACKS (%d)\n", MAX_TRACKS);
+    }
+    free(edl_str);
 
     if (track_count == 0) {
         fprintf(stderr, "No valid tracks specified in EDL string.\n");
