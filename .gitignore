@@ -6,5 +6,10 @@ smoke_*
 *.wav
 *.mp4
 *.flac
+*.edl
+*.arc
+*.vedl
 michacka_*
 /out/
+/scripts/
+text.txt
