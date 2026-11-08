@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# gram-yt-music — Sync and prepare music for gram & Graph from:
+#   1) A YouTube playlist (via yt-dlp / YouTube OAuth)
+#   2) kof17/archive/kof/Music (local mount or via ssh boxC:/mnt/kof17/archive/kof/Music)
+# Also supports pushing a curated pool to a connected Android phone (/sdcard/Music/gram).
+set -euo pipefail
+
+CONF="${GRAM_CONF:-$HOME/.config/gram.conf}"
+POOL_DIR="${GRAM_MUSIC_POOL:-$HOME/.local/share/gram/music_pool}"
+KOF17_PATH="/mnt/kof17/archive/kof/Music"
+BOXC_HOST="${BOXC_HOST:-boxC}"
+
+conf_val() {
+    local key="$1"
+    if [ -f "$CONF" ]; then
+        grep -E "^${key}=" "$CONF" 2>/dev/null | tail -n 1 | cut -d= -f2- | sed "s|^~|$HOME|" || true
+    fi
+}
+
+usage() {
+    cat <<EOF
+usage: $(basename "$0") <command> [args]
+
+Commands:
+  path                          Print local music pool directory ($POOL_DIR)
+  sync-yt [PLAYLIST_URL_OR_ID]  Download/sync tracks from YouTube playlist into pool
+  sync-kof17 [MAX_TRACKS]       Sync tracks from kof17/archive/kof/Music (local or boxC)
+  list-kof17                    List artists/folders in kof17/archive/kof/Music
+  analyze                       Run 'gram analyze' on all tracks in $POOL_DIR
+  push-phone [MAX_TRACKS]       Push tracks from pool to connected Android phone (/sdcard/Music/gram)
+  help                          Show this help
+
+Environment / Config (~/.config/gram.conf):
+  yt_playlist=URL_OR_ID         Default YouTube playlist for sync-yt
+  GRAM_YT_PLAYLIST              Env override for YouTube playlist
+  GRAM_MUSIC_POOL               Override local pool dir (default: ~/.local/share/gram/music_pool)
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+mkdir -p "$POOL_DIR"
+
+analyze_pool() {
+    local gram_bin=""
+    if command -v gram >/dev/null 2>&1; then
+        gram_bin="gram"
+    elif [ -x "$HOME/bin/gram" ]; then
+        gram_bin="$HOME/bin/gram"
+    fi
+    if [ -n "$gram_bin" ]; then
+        shopt -s nullglob
+        local files=("$POOL_DIR"/*.wav "$POOL_DIR"/*.mp3 "$POOL_DIR"/*.flac "$POOL_DIR"/*.m4a "$POOL_DIR"/*.ogg)
+        if [ "${#files[@]}" -gt 0 ]; then
+            echo "[gram-yt-music] Running gram analyze on ${#files[@]} track(s)..."
+            "$gram_bin" analyze "${files[@]}" || true
+        fi
+    fi
+}
+
+case "$cmd" in
+    path)
+        echo "$POOL_DIR"
+        ;;
+    sync-yt)
+        pl="${1:-${GRAM_YT_PLAYLIST:-$(conf_val yt_playlist)}}"
+        if [ -z "$pl" ]; then
+            echo "error: no YouTube playlist URL/ID provided (pass as arg, set GRAM_YT_PLAYLIST, or add yt_playlist= in ~/.config/gram.conf)" >&2
+            exit 1
+        fi
+        echo "[gram-yt-music] Syncing YouTube playlist: $pl -> $POOL_DIR"
+        yt-dlp --ignore-errors \
+            --download-archive "$POOL_DIR/.yt_archive.txt" \
+            -x --audio-format mp3 --audio-quality 0 \
+            -o "$POOL_DIR/%(title).80s-%(id)s.%(ext)s" \
+            "$pl"
+        analyze_pool
+        ;;
+    list-kof17)
+        if [ -d "$KOF17_PATH" ]; then
+            ls -1 "$KOF17_PATH"
+        else
+            ssh "$BOXC_HOST" "ls -1 '$KOF17_PATH'"
+        fi
+        ;;
+    sync-kof17)
+        max="${1:-12}"
+        echo "[gram-yt-music] Syncing up to $max audio tracks from kof17/archive/kof/Music -> $POOL_DIR"
+        if [ -d "$KOF17_PATH" ]; then
+            find "$KOF17_PATH" -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.m4a" -o -iname "*.ogg" \) \
+                | head -n "$max" | while IFS= read -r f; do
+                    cp -n "$f" "$POOL_DIR/"
+                done
+        else
+            ssh "$BOXC_HOST" "find '$KOF17_PATH' -type f \( -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.ogg' \) | head -n $max" \
+                | while IFS= read -r remote_f; do
+                    [ -z "$remote_f" ] && continue
+                    base="$(basename "$remote_f" | tr ' :()' '____')"
+                    if [ ! -f "$POOL_DIR/$base" ]; then
+                        echo "  fetching $base..."
+                        ssh "$BOXC_HOST" "cat $(printf '%q' "$remote_f")" > "$POOL_DIR/$base" </dev/null || rm -f "$POOL_DIR/$base"
+                    fi
+                done
+        fi
+        analyze_pool
+        echo "[gram-yt-music] Pool ready in $POOL_DIR ($(ls -1 "$POOL_DIR" | wc -l) files)"
+        ;;
+    analyze)
+        analyze_pool
+        ;;
+    push-phone)
+        max="${1:-10}"
+        if ! command -v adb >/dev/null 2>&1; then
+            echo "error: adb not found" >&2
+            exit 1
+        fi
+        shopt -s nullglob
+        files=("$POOL_DIR"/*.mp3 "$POOL_DIR"/*.wav "$POOL_DIR"/*.m4a "$POOL_DIR"/*.flac "$POOL_DIR"/*.ogg)
+        if [ "${#files[@]}" -eq 0 ]; then
+            echo "[gram-yt-music] Pool empty, syncing from kof17 first..."
+            "$0" sync-kof17 "$max"
+            files=("$POOL_DIR"/*.mp3 "$POOL_DIR"/*.wav "$POOL_DIR"/*.m4a "$POOL_DIR"/*.flac "$POOL_DIR"/*.ogg)
+        fi
+        adb shell "mkdir -p /sdcard/Music/gram"
+        count=0
+        for f in "${files[@]}"; do
+            [ "$count" -ge "$max" ] && break
+            stem="$(basename "${f%.*}")"
+            m4a_tmp="/tmp/${stem}.m4a"
+            if [[ "$f" == *.m4a ]]; then
+                m4a_tmp="$f"
+            else
+                ffmpeg -v error -y -i "$f" -vn -c:a aac -b:a 192k -ar 48000 -ac 2 "$m4a_tmp"
+            fi
+            echo "[gram-yt-music] Pushing ${stem}.m4a -> /sdcard/Music/gram/"
+            adb push "$m4a_tmp" "/sdcard/Music/gram/${stem}.m4a"
+            [[ "$m4a_tmp" != "$f" ]] && rm -f "$m4a_tmp"
+            count=$((count + 1))
+        done
+        echo "[gram-yt-music] Pushed $count track(s) to /sdcard/Music/gram/"
+        ;;
+    help|--help|-h|*)
+        usage
+        ;;
+esac

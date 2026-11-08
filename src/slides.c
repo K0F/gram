@@ -110,6 +110,8 @@ static const char *resolve_dada_bin(const SlidesOpts *o, char *buf, size_t n)
     if (ex[0]) {
         snprintf(buf, n, "%s/dada/dada", ex);
         if (file_exec(buf)) return buf;
+        snprintf(buf, n, "%s/dada", ex);
+        if (file_exec(buf)) return buf;
     }
     if (file_exec("dada/dada")) {
         snprintf(buf, n, "%s", "dada/dada");
@@ -128,7 +130,9 @@ static const char *resolve_dada_bin(const SlidesOpts *o, char *buf, size_t n)
     return buf;
 }
 
-/* resolve the stone image path (--stone > exe/dada/noise.png > dada/noise.png) */
+/* resolve the stone image path (--stone > $GRAM_STONE > exe/dada/noise.png
+ * > dada/noise.png > exe/noise.png > exe/../share/gram/noise.png
+ * > ~/.local/share/gram/noise.png) */
 static const char *resolve_stone(const SlidesOpts *o, char *buf, size_t n)
 {
     char ex[1024];
@@ -141,8 +145,26 @@ static const char *resolve_stone(const SlidesOpts *o, char *buf, size_t n)
             if (file_ok(tilde)) { snprintf(buf, n, "%s", tilde); return buf; }
         }
     }
+    const char *env_stone = getenv("GRAM_STONE");
+    if (env_stone && env_stone[0] && file_ok(env_stone)) {
+        snprintf(buf, n, "%s", env_stone);
+        return buf;
+    }
     if (ex[0]) {
         snprintf(buf, n, "%s/dada/noise.png", ex);
+        if (file_ok(buf)) return buf;
+        snprintf(buf, n, "%s/noise.png", ex);
+        if (file_ok(buf)) return buf;
+        snprintf(buf, n, "%s/../share/gram/noise.png", ex);
+        if (file_ok(buf)) return buf;
+    }
+    if (file_ok("dada/noise.png")) {
+        snprintf(buf, n, "dada/noise.png");
+        return buf;
+    }
+    const char *home = getenv("HOME");
+    if (home && home[0]) {
+        snprintf(buf, n, "%s/.local/share/gram/noise.png", home);
         if (file_ok(buf)) return buf;
     }
     snprintf(buf, n, "dada/noise.png");
